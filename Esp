@@ -1,0 +1,700 @@
+-- ============================================================
+--  ESP FRAMEWORK  |  Core Module
+--  Require this once, then call ESPFramework.new() per game
+-- ============================================================
+-- Usage:
+--
+--   local ESP = loadstring(game:HttpGet("YOUR_RAW_LINK"))()
+--
+--   local hub = ESP.new({
+--       Title  = "My Hub",
+--       Author = "by me",
+--   })
+--
+--   -- Register a folder (every child gets ESP)
+--   hub:RegisterFolder("Loot",  workspace.Loot,           { Color = Color3.fromRGB(80,255,120) })
+--   hub:RegisterFolder("NPCs",  workspace.NPCS,           { Color = Color3.fromRGB(255,90,90)  })
+--
+--   -- Register specific named objects
+--   hub:RegisterObject("Bank",  workspace.MAP.Buildings.Bank, { Color = Color3.fromRGB(255,220,60) })
+--
+--   -- Register many objects in one call
+--   hub:RegisterObjects("Map", Color3.fromRGB(80,160,255), {
+--       workspace.MAP.Buildings.Bank,
+--       workspace.MAP.Buildings.Saloon,
+--   })
+--
+--   hub:Start()   -- begin the heartbeat loop
+-- ============================================================
+
+local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
+local CoreGui      = game:GetService("CoreGui")
+local TextService  = game:GetService("TextService")
+
+local LocalPlayer  = Players.LocalPlayer
+
+-- ============================================================
+--  PRIVATE CONSTANTS
+-- ============================================================
+
+local FONT        = Enum.Font.GothamBold
+local FONT_SIZE   = 13
+local H           = 34      -- pill height
+local PAD_L       = 16      -- left padding (after accent bar)
+local PAD_R       = 12      -- right padding
+local SEP         = "  |  "
+
+local function measureW(text)
+    return TextService:GetTextSize(text, FONT_SIZE, FONT, Vector2.new(4000, H)).X
+end
+local SEP_W = measureW(SEP)
+
+-- ============================================================
+--  PRIVATE HELPERS
+-- ============================================================
+
+local function getRoot()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("PrimaryPart")
+end
+
+local function getPrimaryPart(obj)
+    if obj:IsA("BasePart") then return obj end
+    if obj.PrimaryPart       then return obj.PrimaryPart end
+    return obj:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function getDist(pos)
+    local root = getRoot()
+    if not root then return 0 end
+    return math.floor((root.Position - pos).Magnitude)
+end
+
+local function boostColor(c)
+    local r, g, b  = c.R, c.G, c.B
+    local mx       = math.max(r, g, b)
+    if mx > 0 and mx < 0.60 then
+        local s = 0.90 / mx
+        r, g, b = math.min(r*s,1), math.min(g*s,1), math.min(b*s,1)
+    end
+    return Color3.new(r, g, b)
+end
+
+local function getUnique(folder)
+    if not folder then return {} end
+    local seen, out = {}, {}
+    for _, c in ipairs(folder:GetChildren()) do
+        if not seen[c.Name] then seen[c.Name]=true; table.insert(out, c.Name) end
+    end
+    table.sort(out); return out
+end
+
+local function getClosest(folder, name)
+    local root = getRoot()
+    if not root or not folder then return nil end
+    local best, bd = nil, math.huge
+    for _, c in ipairs(folder:GetChildren()) do
+        if c.Name == name then
+            local p = getPrimaryPart(c)
+            if p then
+                local d = (root.Position - p.Position).Magnitude
+                if d < bd then bd=d; best=c end
+            end
+        end
+    end
+    return best
+end
+
+local function teleportTo(obj)
+    local p = getPrimaryPart(obj); local root = getRoot()
+    if p and root then root.CFrame = CFrame.new(p.Position + Vector3.new(0,4,0)); return true end
+    return false
+end
+
+-- ============================================================
+--  BILLBOARD BUILDER
+-- ============================================================
+
+local function buildBillboard(part, parent)
+    local bb = Instance.new("BillboardGui")
+    bb.Name        = "_ESP_BB"
+    bb.AlwaysOnTop = true
+    bb.Size        = UDim2.fromOffset(160, H)
+    bb.StudsOffset = Vector3.new(0, 3.5, 0)
+    bb.Adornee     = part
+    bb.Parent      = parent or CoreGui
+
+    local bg = Instance.new("Frame", bb)
+    bg.Name                   = "BG"
+    bg.BackgroundColor3       = Color3.new(0.05,0.05,0.09)
+    bg.BackgroundTransparency = 0
+    bg.Size                   = UDim2.fromScale(1,1)
+    bg.BorderSizePixel        = 0
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(0,8)
+
+    local grad = Instance.new("UIGradient", bg)
+    grad.Rotation = 0
+
+    local stroke = Instance.new("UIStroke", bg)
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Thickness       = 1
+    stroke.Transparency    = 0.30
+
+    local accent = Instance.new("Frame", bg)
+    accent.Name            = "Accent"
+    accent.Size            = UDim2.new(0,3,1,0)
+    accent.Position        = UDim2.new(0,0,0,0)
+    accent.BorderSizePixel = 0
+    Instance.new("UICorner", accent).CornerRadius = UDim.new(0,8)
+
+    local function makeLbl(zidx)
+        local l = Instance.new("TextLabel", bg)
+        l.BackgroundTransparency = 1
+        l.AnchorPoint            = Vector2.new(0, 0.5)
+        l.Font                   = FONT
+        l.TextSize               = FONT_SIZE
+        l.TextXAlignment         = Enum.TextXAlignment.Left
+        l.TextStrokeTransparency = 0
+        l.TextStrokeColor3       = Color3.new(0,0,0)
+        l.ZIndex                 = zidx or 5
+        return l
+    end
+
+    local nameLbl  = makeLbl(5);  nameLbl.Name  = "NameLbl";  nameLbl.TextColor3  = Color3.new(1,1,1)
+    local sepLbl   = makeLbl(5);  sepLbl.Name   = "SepLbl";   sepLbl.Text         = SEP
+                                                               sepLbl.TextColor3   = Color3.fromRGB(190,190,220)
+                                                               sepLbl.TextStrokeTransparency = 1
+    local distLbl  = makeLbl(5);  distLbl.Name  = "DistLbl";  distLbl.Font        = Enum.Font.GothamBold
+
+    return { bb=bb, bg=bg, grad=grad, stroke=stroke, accent=accent,
+             nameLbl=nameLbl, sepLbl=sepLbl, distLbl=distLbl }
+end
+
+local function updateBillboard(refs, obj, color, part)
+    local bb      = refs.bb;      if not (bb and bb.Parent) then return end
+    local bg      = refs.bg
+    local grad    = refs.grad
+    local stroke  = refs.stroke
+    local accent  = refs.accent
+    local nameLbl = refs.nameLbl
+    local sepLbl  = refs.sepLbl
+    local distLbl = refs.distLbl
+
+    bb.Adornee = part
+
+    local nameStr = obj.Name
+    local distStr = getDist(part.Position) .. "m"
+    local nameW   = measureW(nameStr)
+    local distW   = measureW(distStr)
+    local totalW  = 3 + PAD_L + nameW + SEP_W + distW + PAD_R
+
+    bb.Size = UDim2.fromOffset(totalW, H)
+
+    local x = 3 + PAD_L
+    nameLbl.Text     = nameStr
+    nameLbl.Size     = UDim2.fromOffset(nameW,     H)
+    nameLbl.Position = UDim2.new(0, x, 0.5, 0)
+
+    x = x + nameW
+    sepLbl.Size     = UDim2.fromOffset(SEP_W, H)
+    sepLbl.Position = UDim2.new(0, x, 0.5, 0)
+
+    x = x + SEP_W
+    distLbl.Text     = distStr
+    distLbl.Size     = UDim2.fromOffset(distW+4, H)
+    distLbl.Position = UDim2.new(0, x, 0.5, 0)
+
+    local bright = boostColor(color)
+
+    grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0,    color),
+        ColorSequenceKeypoint.new(0.40, Color3.new(0.08,0.08,0.12)),
+        ColorSequenceKeypoint.new(1,    Color3.new(0.04,0.04,0.07)),
+    })
+    grad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,    0.15),
+        NumberSequenceKeypoint.new(0.40, 0.52),
+        NumberSequenceKeypoint.new(1,    0.60),
+    })
+
+    accent.BackgroundColor3 = color
+    stroke.Color            = color
+    nameLbl.TextColor3      = Color3.new(1,1,1)
+    distLbl.TextColor3      = bright
+    sepLbl.TextColor3       = Color3.fromRGB(190,190,220)
+end
+
+-- ============================================================
+--  HIGHLIGHT BUILDER  (through walls)
+-- ============================================================
+
+local function buildHighlight(obj, color)
+    local adornee = obj:IsA("Model") and obj or getPrimaryPart(obj)
+    if not adornee then return nil end
+    local hl = Instance.new("Highlight")
+    hl.Name                = "_ESP_HL"
+    hl.Adornee             = adornee
+    hl.FillColor           = color
+    hl.OutlineColor        = boostColor(color)
+    hl.FillTransparency    = 0.65
+    hl.OutlineTransparency = 0
+    hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent              = CoreGui
+    return hl
+end
+
+-- ============================================================
+--  ESP HUB CLASS
+-- ============================================================
+
+local ESPHub = {}
+ESPHub.__index = ESPHub
+
+function ESPHub.new(config)
+    config = config or {}
+
+    local self = setmetatable({}, ESPHub)
+
+    -- ── Internal ESP state ────────────────────────────────
+    self._bbRefs    = {}   -- [instance] = billboard refs table
+    self._highlights= {}   -- [instance] = Highlight
+    self._boxEnabled= false
+    self._running   = false
+    self._conn      = nil
+
+    -- ── Category registry ─────────────────────────────────
+    --  Each category = {
+    --      kind     = "folder" | "object"
+    --      enabled  = bool
+    --      color    = Color3
+    --      folder   = Folder? (for kind="folder")
+    --      object   = Instance? (for kind="object")
+    --      label    = string   (display name in UI)
+    --      drop     = WindUI Dropdown? (for folder categories)
+    --      selected = string?
+    --  }
+    self._categories = {}
+
+    -- ── WindUI ───────────────────────────────────────────
+    local WindUI = loadstring(game:HttpGet(
+        "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"
+    ))()
+    self._windui = WindUI
+
+    WindUI:AddTheme({
+        Name        = "ESPTheme",
+        Accent      = Color3.fromHex("#1a1a2e"),
+        Background  = Color3.fromHex("#0d0d1a"),
+        Outline     = Color3.fromHex("#2a2a4a"),
+        Text        = Color3.fromHex("#e8e8ff"),
+        Placeholder = Color3.fromHex("#6060a0"),
+        Button      = Color3.fromHex("#252545"),
+        Icon        = Color3.fromHex("#8080c0"),
+    })
+    WindUI:SetTheme("ESPTheme")
+
+    local win = WindUI:CreateWindow({
+        Title       = config.Title  or "ESP Hub",
+        Icon        = config.Icon   or "eye",
+        Author      = config.Author or "esp-framework",
+        Folder      = config.Folder or "ESPFramework",
+        Size        = config.Size   or UDim2.fromOffset(580, 500),
+        Transparent = true,
+        Theme       = "ESPTheme",
+        Resizable   = true,
+    })
+    self._win = win
+
+    -- ── Fixed tabs ────────────────────────────────────────
+    self._tabESP      = win:Tab({ Title = "ESP",      Icon = "eye"      })
+    self._tabTeleport = win:Tab({ Title = "Teleport", Icon = "zap"      })
+    self._tabSettings = win:Tab({ Title = "Settings", Icon = "settings" })
+
+    self:_buildSettingsTab()
+
+    return self
+end
+
+-- ──────────────────────────────────────────────────────────
+--  REGISTER FOLDER
+--  Every child of `folder` gets an ESP label.
+--  A dropdown + teleport button are added automatically.
+-- ──────────────────────────────────────────────────────────
+function ESPHub:RegisterFolder(label, folder, opts)
+    opts = opts or {}
+    local cat = {
+        kind     = "folder",
+        label    = label,
+        folder   = folder,
+        enabled  = true,
+        color    = opts.Color or Color3.fromRGB(255,255,255),
+        selected = nil,
+        drop     = nil,
+        icon     = opts.Icon or "package",
+    }
+    table.insert(self._categories, cat)
+    self:_buildFolderUI(cat)
+    return self
+end
+
+-- ──────────────────────────────────────────────────────────
+--  REGISTER SINGLE OBJECT
+-- ──────────────────────────────────────────────────────────
+function ESPHub:RegisterObject(label, object, opts)
+    opts = opts or {}
+    local cat = {
+        kind    = "object",
+        label   = label,
+        object  = object,
+        enabled = true,
+        color   = opts.Color or Color3.fromRGB(255,255,255),
+        icon    = opts.Icon  or "map-pin",
+    }
+    table.insert(self._categories, cat)
+    self:_buildObjectUI(cat)
+    return self
+end
+
+-- ──────────────────────────────────────────────────────────
+--  REGISTER MULTIPLE OBJECTS UNDER ONE CATEGORY / COLOUR
+-- ──────────────────────────────────────────────────────────
+function ESPHub:RegisterObjects(label, color, objects, opts)
+    opts = opts or {}
+    for _, obj in ipairs(objects) do
+        local cat = {
+            kind    = "object",
+            label   = obj.Name,
+            object  = obj,
+            enabled = true,
+            color   = color,
+            icon    = opts.Icon or "map-pin",
+            _group  = label,
+        }
+        table.insert(self._categories, cat)
+    end
+    -- Build a single group section in UI
+    self:_buildObjectGroupUI(label, color, objects, opts)
+    return self
+end
+
+-- ──────────────────────────────────────────────────────────
+--  START  –  begin the heartbeat loop
+-- ──────────────────────────────────────────────────────────
+function ESPHub:Start()
+    if self._running then return end
+    self._running = true
+
+    local lastRefresh    = 0
+    local REFRESH_RATE   = 5
+
+    self._conn = RunService.Heartbeat:Connect(function()
+        self:_update()
+        local now = tick()
+        if (now - lastRefresh) >= REFRESH_RATE then
+            lastRefresh = now
+            self:_autoRefresh()
+        end
+    end)
+end
+
+-- ──────────────────────────────────────────────────────────
+--  STOP  –  disconnect loop & clear all ESP
+-- ──────────────────────────────────────────────────────────
+function ESPHub:Stop()
+    if self._conn then self._conn:Disconnect(); self._conn = nil end
+    self._running = false
+    self:_clearAll()
+end
+
+-- ──────────────────────────────────────────────────────────
+--  NOTIFY helper
+-- ──────────────────────────────────────────────────────────
+function ESPHub:Notify(title, content, icon)
+    self._windui:Notify({ Title=title, Content=content, Duration=2, Icon=icon or "info" })
+end
+
+-- ============================================================
+--  PRIVATE  –  UI BUILDERS
+-- ============================================================
+
+function ESPHub:_buildFolderUI(cat)
+    local espTab  = self._tabESP
+    local telTab  = self._tabTeleport
+
+    -- ── ESP section ───────────────────────────────────────
+    local sec = espTab:Section({ Title = cat.label .. " ESP", Opened = true })
+
+    espTab:Toggle({
+        Title = "Enable " .. cat.label .. " ESP",
+        Value = true,
+        Callback = function(v)
+            cat.enabled = v
+            if not v then self:_clearCategory(cat) end
+        end,
+    })
+
+    espTab:Colorpicker({
+        Title    = cat.label .. " Color",
+        Desc     = "Accent, glow and distance text colour",
+        Default  = cat.color,
+        Callback = function(c) cat.color = c end,
+    })
+
+    espTab:Divider()
+
+    -- ── Teleport section ──────────────────────────────────
+    telTab:Section({ Title = cat.label, Opened = true })
+
+    local names = getUnique(cat.folder)
+    local drop = telTab:Dropdown({
+        Title            = "Select " .. cat.label,
+        Desc             = "Unique names — teleports to the closest",
+        Values           = #names > 0 and names or {"(none found)"},
+        Value            = #names > 0 and names[1] or "(none found)",
+        SearchBarEnabled = true,
+        Callback         = function(v) cat.selected = v end,
+    })
+    cat.drop = drop
+
+    telTab:Button({
+        Title = "↻  Refresh " .. cat.label .. " List",
+        Callback = function()
+            local n = getUnique(cat.folder)
+            drop:Refresh(#n > 0 and n or {"(none found)"})
+            self:Notify(cat.label, "List refreshed ✓", "refresh-cw")
+        end,
+    })
+
+    telTab:Button({
+        Title = "⚡  Teleport → Closest " .. cat.label,
+        Callback = function()
+            local sel = cat.selected
+            if not sel or sel == "(none found)" then
+                self:Notify("Teleport", "Nothing selected.", "alert-circle"); return
+            end
+            local obj = getClosest(cat.folder, sel)
+            if obj and teleportTo(obj) then
+                self:Notify("Teleported!", "→  " .. sel, "zap")
+            else
+                self:Notify("Not Found", sel .. " not in workspace.", "x-circle")
+            end
+        end,
+    })
+
+    telTab:Divider()
+end
+
+function ESPHub:_buildObjectUI(cat)
+    local espTab = self._tabESP
+
+    espTab:Toggle({
+        Title = cat.label .. "  ESP",
+        Value = true,
+        Callback = function(v)
+            cat.enabled = v
+            if not v then self:_clearCategory(cat) end
+        end,
+    })
+
+    espTab:Colorpicker({
+        Title    = cat.label .. " Color",
+        Default  = cat.color,
+        Callback = function(c) cat.color = c end,
+    })
+end
+
+function ESPHub:_buildObjectGroupUI(groupLabel, color, objects, opts)
+    local espTab = self._tabESP
+    espTab:Section({ Title = groupLabel, Opened = true })
+
+    -- One toggle to enable/disable the whole group
+    local groupEnabled = { v = true }
+    espTab:Toggle({
+        Title = "Enable " .. groupLabel .. " ESP",
+        Value = true,
+        Callback = function(v)
+            groupEnabled.v = v
+            for _, cat in ipairs(self._categories) do
+                if cat._group == groupLabel then
+                    cat.enabled = v
+                    if not v then self:_clearCategory(cat) end
+                end
+            end
+        end,
+    })
+
+    espTab:Colorpicker({
+        Title    = groupLabel .. " Color",
+        Desc     = "Applied to all objects in this group",
+        Default  = color,
+        Callback = function(c)
+            for _, cat in ipairs(self._categories) do
+                if cat._group == groupLabel then cat.color = c end
+            end
+        end,
+    })
+
+    -- Paragraph list of tracked objects
+    for _, obj in ipairs(objects) do
+        espTab:Paragraph({ Title = obj.Name, Desc = obj:GetFullName() })
+    end
+
+    espTab:Divider()
+end
+
+function ESPHub:_buildSettingsTab()
+    local st = self._tabSettings
+
+    st:Section({ Title = "Box Highlight (Through Walls)", Opened = true })
+
+    st:Toggle({
+        Title = "Box Highlight",
+        Desc  = "Roblox Highlight — glows through walls & floors",
+        Value = false,
+        Callback = function(v)
+            self._boxEnabled = v
+            if not v then
+                for obj in pairs(self._highlights) do
+                    pcall(function() self._highlights[obj]:Destroy() end)
+                    self._highlights[obj] = nil
+                end
+            end
+        end,
+    })
+
+    st:Divider()
+    st:Section({ Title = "Utilities", Opened = true })
+
+    st:Button({
+        Title = "↻  Force Refresh All",
+        Desc  = "Rebuild every ESP label and all dropdowns",
+        Callback = function()
+            self:_clearAll()
+            for _, cat in ipairs(self._categories) do
+                if cat.kind == "folder" and cat.drop then
+                    local n = getUnique(cat.folder)
+                    pcall(function() cat.drop:Refresh(#n>0 and n or {"(none found)"}) end)
+                end
+            end
+            self:Notify("Refresh", "All ESP rebuilt ✓", "refresh-cw")
+        end,
+    })
+
+    st:Button({
+        Title = "🗑  Destroy All ESP",
+        Desc  = "Remove every label and highlight",
+        Callback = function()
+            self:_clearAll()
+            self:Notify("Cleared", "All ESP removed.", "trash-2")
+        end,
+    })
+end
+
+-- ============================================================
+--  PRIVATE  –  ESP MANAGEMENT
+-- ============================================================
+
+function ESPHub:_ensureBillboard(obj, color)
+    local part = getPrimaryPart(obj); if not part then return end
+
+    if not self._bbRefs[obj] or not self._bbRefs[obj].bb.Parent then
+        self._bbRefs[obj] = buildBillboard(part, CoreGui)
+    end
+
+    updateBillboard(self._bbRefs[obj], obj, color, part)
+end
+
+function ESPHub:_ensureHighlight(obj, color)
+    if not self._boxEnabled then return end
+    if not self._highlights[obj] or not self._highlights[obj].Parent then
+        self._highlights[obj] = buildHighlight(obj, color)
+    end
+    if self._highlights[obj] then
+        self._highlights[obj].FillColor    = color
+        self._highlights[obj].OutlineColor = boostColor(color)
+    end
+end
+
+function ESPHub:_removeSingle(obj)
+    if self._bbRefs[obj] then
+        pcall(function() self._bbRefs[obj].bb:Destroy() end)
+        self._bbRefs[obj] = nil
+    end
+    if self._highlights[obj] then
+        pcall(function() self._highlights[obj]:Destroy() end)
+        self._highlights[obj] = nil
+    end
+end
+
+function ESPHub:_clearCategory(cat)
+    if cat.kind == "folder" and cat.folder then
+        for _, c in ipairs(cat.folder:GetChildren()) do self:_removeSingle(c) end
+    elseif cat.kind == "object" and cat.object then
+        self:_removeSingle(cat.object)
+    end
+end
+
+function ESPHub:_clearAll()
+    for obj in pairs(self._bbRefs)    do self:_removeSingle(obj) end
+    for obj in pairs(self._highlights) do self:_removeSingle(obj) end
+end
+
+-- ============================================================
+--  PRIVATE  –  UPDATE (every frame)
+-- ============================================================
+
+function ESPHub:_update()
+    for _, cat in ipairs(self._categories) do
+        if cat.enabled then
+            if cat.kind == "folder" and cat.folder and cat.folder.Parent then
+                for _, c in ipairs(cat.folder:GetChildren()) do
+                    self:_ensureBillboard(c, cat.color)
+                    self:_ensureHighlight(c, cat.color)
+                end
+            elseif cat.kind == "object" and cat.object and cat.object.Parent then
+                self:_ensureBillboard(cat.object, cat.color)
+                self:_ensureHighlight(cat.object, cat.color)
+            end
+        end
+    end
+
+    -- Stale cleanup
+    for obj, refs in pairs(self._bbRefs) do
+        if not obj.Parent or not refs.bb.Parent then self:_removeSingle(obj) end
+    end
+    for obj, hl in pairs(self._highlights) do
+        if not obj.Parent or not hl.Parent then
+            pcall(function() hl:Destroy() end); self._highlights[obj] = nil
+        end
+    end
+
+    -- Hide disabled
+    if not self._boxEnabled then
+        for obj in pairs(self._highlights) do
+            pcall(function() self._highlights[obj]:Destroy() end)
+            self._highlights[obj] = nil
+        end
+    end
+end
+
+-- ============================================================
+--  PRIVATE  –  AUTO REFRESH  (every 5 s)
+-- ============================================================
+
+function ESPHub:_autoRefresh()
+    self:_clearAll()
+    for _, cat in ipairs(self._categories) do
+        if cat.kind == "folder" and cat.drop then
+            local n = getUnique(cat.folder)
+            pcall(function() cat.drop:Refresh(#n>0 and n or {"(none found)"}) end)
+        end
+    end
+end
+
+-- ============================================================
+--  PUBLIC API RETURN
+-- ============================================================
+
+return { new = ESPHub.new }
