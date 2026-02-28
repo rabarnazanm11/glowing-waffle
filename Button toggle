@@ -40,7 +40,7 @@ local function ToggleButton(Window, Options)
     local LABEL        = Options.Label       or "Anime Finals"
     local POS          = Options.Position    or UDim2.fromOffset(20, 20)
     local SIZE         = Options.Size        or UDim2.fromOffset(148, 38)
-    local DRAGGABLE    = Options.Draggable   ~= true
+    local DRAGGABLE    = Options.Draggable   ~= false
     local HIDE_ON_START= Options.HideOnStart or false
     local ACCENT       = Options.AccentColor or ML_ACCENT
     -- ─────────────────────────────────────────────────────────
