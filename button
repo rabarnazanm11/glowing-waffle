@@ -1,0 +1,239 @@
+-- ══════════════════════════════════════════════════════════════
+--              TOGGLE BUTTON TEMPLATE  |  by TheOwner
+--  Drop this AFTER your Window is created, pass it as argument.
+--  Works with MacLib, WindUI, or any UI with :SetState(bool).
+--  Parented to CoreGui — survives death, respawn, and resets.
+-- ══════════════════════════════════════════════════════════════
+
+--[[
+    QUICK SETUP:
+        local ToggleButton = loadstring(game:HttpGet("-- your raw URL here --"))()
+        ToggleButton(Window, Options)
+
+    OPTIONS (all optional):
+        Label       <string>   -- Text shown on the button         (default: "Bora Hub")
+        Position    <UDim2>    -- Starting position                (default: top-left)
+        Size        <UDim2>    -- Button size                      (default: 148 x 38)
+        Draggable   <boolean>  -- Whether the button can be moved  (default: true)
+        HideOnStart <boolean>  -- Hide the UI when script loads    (default: false)
+        AccentColor <Color3>   -- Stripe / dot accent color        (default: MacLib blue)
+--]]
+
+local function ToggleButton(Window, Options)
+    -- ── Guard ─────────────────────────────────────────────────
+    assert(Window,          "[ToggleButton] Window argument is required.")
+    assert(Window.SetState, "[ToggleButton] Window must have a :SetState(bool) method.")
+
+    Options = Options or {}
+
+    -- ── MacLib palette ────────────────────────────────────────
+    local ML_SURFACE     = Color3.fromRGB(34,  34,  40 )   -- card surface
+    local ML_SURFACE_HOV = Color3.fromRGB(42,  42,  50 )   -- hovered
+    local ML_SURFACE_PRE = Color3.fromRGB(22,  22,  28 )   -- pressed
+    local ML_BORDER      = Color3.fromRGB(55,  55,  65 )   -- 1px separator ring
+    local ML_TEXT        = Color3.fromRGB(230, 230, 235)   -- primary text
+    local ML_GREEN       = Color3.fromRGB(52,  199, 89 )   -- macOS green  (visible)
+    local ML_RED         = Color3.fromRGB(255, 69,  58 )   -- macOS red    (hidden)
+    local ML_ACCENT      = Color3.fromRGB(10,  132, 255)   -- macOS blue accent
+
+    -- ── Config ────────────────────────────────────────────────
+    local LABEL        = Options.Label       or "Anime Finals"
+    local POS          = Options.Position    or UDim2.fromOffset(20, 20)
+    local SIZE         = Options.Size        or UDim2.fromOffset(148, 38)
+    local DRAGGABLE    = Options.Draggable   ~= false
+    local HIDE_ON_START= Options.HideOnStart or false
+    local ACCENT       = Options.AccentColor or ML_ACCENT
+    -- ─────────────────────────────────────────────────────────
+
+    local visible = not HIDE_ON_START
+    if HIDE_ON_START then Window:SetState(false) end
+
+    -- ── Services ──────────────────────────────────────────────
+    local TweenService     = game:GetService("TweenService")
+    local UserInputService = game:GetService("UserInputService")
+
+    -- ── Resolve parent ────────────────────────────────────────
+    -- CoreGui persists through death / character resets entirely.
+    -- If the executor blocks CoreGui access we fall back to PlayerGui
+    -- with ResetOnSpawn = false, which also survives death in most cases.
+    local guiParent
+    local ok, result = pcall(function() return game:GetService("CoreGui") end)
+    guiParent = (ok and result) or game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+
+    -- ── ScreenGui ─────────────────────────────────────────────
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name           = "MacLib_ToggleButton"
+    ScreenGui.ResetOnSpawn   = false     -- fallback safety for PlayerGui
+    ScreenGui.IgnoreGuiInset = true
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ScreenGui.Parent         = guiParent
+
+    -- ── Drop shadow ───────────────────────────────────────────
+    local Shadow = Instance.new("Frame")
+    Shadow.Name                   = "Shadow"
+    Shadow.Size                   = UDim2.new(SIZE.X.Scale, SIZE.X.Offset, SIZE.Y.Scale, SIZE.Y.Offset + 4)
+    Shadow.Position               = UDim2.new(POS.X.Scale,  POS.X.Offset,  POS.Y.Scale,  POS.Y.Offset  + 2)
+    Shadow.BackgroundColor3       = Color3.fromRGB(0, 0, 0)
+    Shadow.BackgroundTransparency = 0.65
+    Shadow.BorderSizePixel        = 0
+    Shadow.ZIndex                 = 1
+    Shadow.Parent                 = ScreenGui
+    Instance.new("UICorner", Shadow).CornerRadius = UDim.new(0, 12)
+
+    -- ── Outer border ring (1 px MacLib-style separator) ───────
+    local Ring = Instance.new("Frame")
+    Ring.Name                   = "Ring"
+    Ring.Size                   = SIZE
+    Ring.Position               = POS
+    Ring.BackgroundColor3       = ML_BORDER
+    Ring.BackgroundTransparency = 0
+    Ring.BorderSizePixel        = 0
+    Ring.ZIndex                 = 2
+    Ring.Parent                 = ScreenGui
+    Instance.new("UICorner", Ring).CornerRadius = UDim.new(0, 10)
+
+    -- ── Button surface (inset 1 px inside Ring) ───────────────
+    local Btn = Instance.new("TextButton")
+    Btn.Name             = "ToggleBtn"
+    Btn.Size             = UDim2.new(1, -2, 1, -2)
+    Btn.Position         = UDim2.fromOffset(1, 1)
+    Btn.BackgroundColor3 = ML_SURFACE
+    Btn.BorderSizePixel  = 0
+    Btn.Text             = ""
+    Btn.AutoButtonColor  = false
+    Btn.ZIndex           = 3
+    Btn.Parent           = Ring
+    Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 9)
+
+    -- ── Left accent stripe ────────────────────────────────────
+    local Stripe = Instance.new("Frame")
+    Stripe.Name             = "Stripe"
+    Stripe.Size             = UDim2.fromOffset(3, 18)
+    Stripe.Position         = UDim2.new(0, 10, 0.5, -9)
+    Stripe.BackgroundColor3 = ACCENT
+    Stripe.BorderSizePixel  = 0
+    Stripe.ZIndex           = 4
+    Stripe.Parent           = Btn
+    Instance.new("UICorner", Stripe).CornerRadius = UDim.new(1, 0)
+
+    -- ── Label ─────────────────────────────────────────────────
+    local LabelInst = Instance.new("TextLabel")
+    LabelInst.Name                  = "Label"
+    LabelInst.Size                  = UDim2.new(1, -40, 1, 0)
+    LabelInst.Position              = UDim2.fromOffset(22, 0)
+    LabelInst.BackgroundTransparency= 1
+    LabelInst.Text                  = LABEL
+    LabelInst.TextColor3            = ML_TEXT
+    LabelInst.TextSize              = 13
+    LabelInst.Font                  = Enum.Font.GothamBold
+    LabelInst.TextXAlignment        = Enum.TextXAlignment.Left
+    LabelInst.ZIndex                = 4
+    LabelInst.Parent                = Btn
+
+    -- ── Status dot (macOS traffic-light style, top-right) ─────
+    local Dot = Instance.new("Frame")
+    Dot.Name             = "Dot"
+    Dot.Size             = UDim2.fromOffset(8, 8)
+    Dot.Position         = UDim2.new(1, -16, 0.5, -4)
+    Dot.BackgroundColor3 = visible and ML_GREEN or ML_RED
+    Dot.BorderSizePixel  = 0
+    Dot.ZIndex           = 4
+    Dot.Parent           = Btn
+    Instance.new("UICorner", Dot).CornerRadius = UDim.new(1, 0)
+
+    -- Soft glow ring around dot
+    local DotRing = Instance.new("UIStroke")
+    DotRing.Color       = visible and ML_GREEN or ML_RED
+    DotRing.Thickness   = 1.5
+    DotRing.Transparency= 0.5
+    DotRing.Parent      = Dot
+
+    -- ── Tween helpers ─────────────────────────────────────────
+    local function setDot(on)
+        local col = on and ML_GREEN or ML_RED
+        TweenService:Create(Dot,     TweenInfo.new(0.2), { BackgroundColor3 = col }):Play()
+        TweenService:Create(DotRing, TweenInfo.new(0.2), { Color            = col }):Play()
+    end
+
+    local function setSurface(col)
+        TweenService:Create(Btn, TweenInfo.new(0.15), { BackgroundColor3 = col }):Play()
+    end
+
+    setDot(visible)   -- initialise dot colour
+
+    -- ── Click ─────────────────────────────────────────────────
+    Btn.MouseButton1Click:Connect(function()
+        visible = not visible
+        Window:SetState(visible)
+        setDot(visible)
+        setSurface(ML_SURFACE_PRE)
+        task.delay(0.1, function() setSurface(ML_SURFACE) end)
+    end)
+
+    -- ── Hover ─────────────────────────────────────────────────
+    Btn.MouseEnter:Connect(function() setSurface(ML_SURFACE_HOV) end)
+    Btn.MouseLeave:Connect(function() setSurface(ML_SURFACE)     end)
+
+    -- ── Drag ──────────────────────────────────────────────────
+    if DRAGGABLE then
+        local dragging, dragStart, startPos = false, nil, nil
+
+        Ring.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+                dragging  = true
+                dragStart = input.Position
+                startPos  = Ring.Position
+            end
+        end)
+
+        Ring.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = false
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if not dragging then return end
+            if input.UserInputType ~= Enum.UserInputType.MouseMovement
+            and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+            local delta  = input.Position - dragStart
+            local newPos = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+            Ring.Position   = newPos
+            Shadow.Position = UDim2.new(
+                newPos.X.Scale, newPos.X.Offset,
+                newPos.Y.Scale, newPos.Y.Offset + 2
+            )
+        end)
+    end
+
+    -- ── Public handle ─────────────────────────────────────────
+    return {
+        -- Force a specific visible state from outside
+        SetVisible = function(state)
+            visible = state
+            Window:SetState(state)
+            setDot(state)
+        end,
+        -- Change label at runtime
+        SetLabel = function(text)
+            LabelInst.Text = text
+        end,
+        -- Swap accent stripe + dot colour at runtime
+        SetAccent = function(color)
+            ACCENT = color
+            Stripe.BackgroundColor3 = color
+        end,
+        -- Remove the button entirely
+        Destroy = function()
+            ScreenGui:Destroy()
+        end,
+    }
+end
+
+return ToggleButton
