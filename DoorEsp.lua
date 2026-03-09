@@ -13,18 +13,17 @@ getgenv().DoorESP = {
     MaxDistance     = 350,
     RaycastDistance = 8,
 
-    -- Room type colours
     Colors = {
-        Start   = Color3.fromRGB(0,   255,   0),  -- Green
-        Boss    = Color3.fromRGB(255,  50,  50),  -- Red
-        Monster = Color3.fromRGB(255, 165,   0),  -- Orange
+        Start   = Color3.fromRGB(0,   255,   0),
+        Boss    = Color3.fromRGB(255,  50,  50),
+        Monster = Color3.fromRGB(255, 165,   0),
         Default = Color3.fromRGB(255, 165,   0),
     },
 }
 
-local Players    = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Camera     = workspace.CurrentCamera
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local Camera      = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
 -- ─────────────────────────────────────────────
@@ -51,30 +50,23 @@ local function NewLine()
 end
 
 -- ─────────────────────────────────────────────
--- Raycast helper — checks if a door still has
--- a wall blocking it (= door not yet open)
+-- Raycast — checks if door still has a wall
 -- ─────────────────────────────────────────────
 
-local rayParams = RaycastParams.new()
+local rayParams       = RaycastParams.new()
 rayParams.FilterType  = Enum.RaycastFilterType.Blacklist
 rayParams.IgnoreWater = true
 
 local function DoorHasWall(adornee)
     if not adornee then return true end
 
-    -- Quick name-check on descendants
-    for _, c in ipairs(adornee.Parent and adornee.Parent:GetDescendants() or {}) do
-        if c:IsA("BasePart") and (c.Name == "Wall" or c.Name:lower():find("wall")) then
-            return true
-        end
-    end
-
-    -- Raycast in six directions
-    for _, dir in ipairs({
+    local dirs = {
         Vector3.new(1,0,0), Vector3.new(-1,0,0),
         Vector3.new(0,1,0), Vector3.new(0,-1,0),
         Vector3.new(0,0,1), Vector3.new(0,0,-1),
-    }) do
+    }
+
+    for _, dir in ipairs(dirs) do
         local r = workspace:Raycast(
             adornee.Position,
             dir * getgenv().DoorESP.RaycastDistance,
@@ -82,7 +74,8 @@ local function DoorHasWall(adornee)
         )
         if r and r.Instance then
             local h = r.Instance
-            if h.Name == "Wall" or h.Name:lower():find("wall")
+            if h.Name == "Wall"
+            or h.Name:lower():find("wall")
             or (h.Parent and h.Parent.Name:lower():find("labr")) then
                 return true
             end
@@ -92,24 +85,25 @@ local function DoorHasWall(adornee)
 end
 
 -- ─────────────────────────────────────────────
--- Room-colour logic
+-- Room colour
 -- ─────────────────────────────────────────────
 
 local function GetRoomColor(room)
     local n = room.Name:lower()
     local c = getgenv().DoorESP.Colors
-    if n:find("start")                        then return c.Start,   "START"
-    elseif n:find("boss") or n:find("end")   then return c.Boss,    "BOSS"
-    elseif n:find("monster")                 then return c.Monster, "MON"
+    if n:find("start") then
+        return c.Start, "START"
+    elseif n:find("boss") or n:find("end") then
+        return c.Boss, "BOSS"
+    elseif n:find("monster") then
+        return c.Monster, "MON"
     end
     return c.Default, "ROOM"
 end
 
 -- ─────────────────────────────────────────────
--- Door cache + Drawing objects
--- ─────────────────────────────────────────────
--- Structure:
---   DoorCache[door] = { adornee, room, label(Drawing.Text), tracer(Drawing.Line) }
+-- Door cache
+-- DoorCache[door] = { adornee, room, label, tracer }
 -- ─────────────────────────────────────────────
 
 local DoorCache = {}
@@ -120,6 +114,7 @@ local function GetAdornee(door)
     elseif door:IsA("BasePart") then
         return door
     end
+    return nil
 end
 
 local function RemoveDoor(door)
@@ -140,19 +135,18 @@ local function HideDoor(door)
 end
 
 -- ─────────────────────────────────────────────
--- Main RenderStepped loop
+-- Main RenderStepped loop  (no goto)
 -- ─────────────────────────────────────────────
 
 RunService.RenderStepped:Connect(function()
-    local cfg = getgenv().DoorESP
-
-    -- Update raycast filter every frame so new characters are excluded
-    local char = LocalPlayer.Character
-    rayParams.FilterDescendantsInstances = char and {char} or {}
-
+    local cfg      = getgenv().DoorESP
+    local char     = LocalPlayer.Character
     local localHRP = char and char:FindFirstChild("HumanoidRootPart")
 
-    -- ── 1. Scan Dungeons for new doors ──────────────────────────────
+    -- Keep raycast filter current
+    rayParams.FilterDescendantsInstances = char and {char} or {}
+
+    -- ── 1. Scan for new doors ──────────────────────────────────────
     if cfg.Enabled and localHRP then
         local dungeons = workspace:FindFirstChild("Dungeons")
         if dungeons then
@@ -182,72 +176,72 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- ── 2. Find closest door (for tracer priority) ───────────────────
+    -- ── 2. Find closest door ──────────────────────────────────────
     local closestDoor, minDist = nil, math.huge
     if localHRP then
         for door, d in pairs(DoorCache) do
-            if door.Parent and d.adornee then
+            if door.Parent and d.adornee and d.adornee.Parent then
                 local dist = (d.adornee.Position - localHRP.Position).Magnitude
-                if dist < minDist then minDist = dist; closestDoor = door end
+                if dist < minDist then
+                    minDist      = dist
+                    closestDoor  = door
+                end
             end
         end
     end
 
-    -- ── 3. Update / hide each cached door ───────────────────────────
+    -- ── 3. Update each door (no goto — use nested ifs) ────────────
     for door, d in pairs(DoorCache) do
-        -- Stale door — remove
-        if not door.Parent or not d.adornee or not d.adornee.Parent then
+        local stale = not door.Parent or not d.adornee or not d.adornee.Parent
+
+        if stale then
             RemoveDoor(door)
-            -- luacheck: ignore
-            goto continue
-        end
-
-        if not cfg.Enabled or not localHRP then
+        elseif not cfg.Enabled or not localHRP then
             HideDoor(door)
-            goto continue
+        else
+            local dist = (d.adornee.Position - localHRP.Position).Magnitude
+
+            if dist > cfg.MaxDistance then
+                HideDoor(door)
+            else
+                local pos, onScreen = Camera:WorldToViewportPoint(d.adornee.Position)
+
+                if not onScreen then
+                    HideDoor(door)
+                else
+                    local color, tag = GetRoomColor(d.room)
+                    local scale      = 1 / (d.adornee.Position - Camera.CFrame.Position).Magnitude * 100
+
+                    -- Label
+                    d.label.Visible = cfg.ShowLabels
+                    if cfg.ShowLabels then
+                        d.label.Text     = string.format("[ %s · %.0fm ]", tag, dist)
+                        d.label.Position = Vector2.new(
+                            pos.X,
+                            pos.Y - math.clamp(scale * 50, 20, 60) - 5
+                        )
+                        d.label.Color = color
+                        d.label.Size  = math.clamp(scale * 90, 11, 15)
+                    end
+
+                    -- Tracer (closest door only)
+                    local isClosest  = (door == closestDoor)
+                    d.tracer.Visible = cfg.ShowTracers and isClosest
+                    if d.tracer.Visible then
+                        local vp          = Camera.ViewportSize
+                        d.tracer.From     = Vector2.new(vp.X * 0.5, vp.Y)
+                        d.tracer.To       = Vector2.new(pos.X, pos.Y)
+                        d.tracer.Color    = color
+                        d.tracer.Thickness = 1
+                    end
+                end
+            end
         end
-
-        local dist = (d.adornee.Position - localHRP.Position).Magnitude
-        if dist > cfg.MaxDistance then
-            HideDoor(door)
-            goto continue
-        end
-
-        local pos, onScreen = Camera:WorldToViewportPoint(d.adornee.Position)
-        if not onScreen then
-            HideDoor(door)
-            goto continue
-        end
-
-        local color, tag = GetRoomColor(d.room)
-        local scale      = 1 / (d.adornee.Position - Camera.CFrame.Position).Magnitude * 100
-
-        -- ── Label ──────────────────────────────────────────────
-        d.label.Visible  = cfg.ShowLabels
-        if cfg.ShowLabels then
-            d.label.Text     = string.format("[ %s · %.0fm ]", tag, dist)
-            d.label.Position = Vector2.new(pos.X, pos.Y - math.clamp(scale * 50, 20, 60) - 5)
-            d.label.Color    = color
-            d.label.Size     = math.clamp(scale * 90, 11, 15)
-        end
-
-        -- ── Tracer (only on the closest door) ──────────────────
-        d.tracer.Visible = cfg.ShowTracers and (door == closestDoor)
-        if d.tracer.Visible then
-            local vp          = Camera.ViewportSize
-            d.tracer.From     = Vector2.new(vp.X * 0.5, vp.Y)
-            d.tracer.To       = Vector2.new(pos.X, pos.Y)
-            d.tracer.Color    = color
-            d.tracer.Thickness = 1
-        end
-
-        ::continue::
     end
 end)
 
 -- ─────────────────────────────────────────────
--- Cleanup when LocalPlayer respawns
--- (doors get re-scanned automatically)
+-- Hide on respawn
 -- ─────────────────────────────────────────────
 
 LocalPlayer.CharacterRemoving:Connect(function()
