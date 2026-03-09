@@ -1,0 +1,244 @@
+-- ╔══════════════════════════════════════════════════╗
+-- ║     DOOR ESP — ANIME ETERNAL STYLE               ║
+-- ║   Locked = Label only · Open = Label + Tracer    ║
+-- ╚══════════════════════════════════════════════════╝
+
+if getgenv().DoorESP_Loaded then return end
+getgenv().DoorESP_Loaded = true
+
+getgenv().DoorESP = {
+    Enabled     = false,
+    ShowLabels  = true,
+    MaxDistance = 350,
+
+    -- Full-bright colours for open doors / tracers
+    Colors = {
+        Start   = Color3.fromRGB(0,   255,   0),   -- green
+        Boss    = Color3.fromRGB(255,  50,  50),   -- red
+        Monster = Color3.fromRGB(255, 165,   0),   -- orange
+        Default = Color3.fromRGB(255, 165,   0),
+    },
+
+    -- Dimmed colours for locked (walled) doors
+    LockedColors = {
+        Start   = Color3.fromRGB(0,   110,   0),
+        Boss    = Color3.fromRGB(110,  20,  20),
+        Monster = Color3.fromRGB(110,  70,   0),
+        Default = Color3.fromRGB(110,  70,   0),
+    },
+}
+
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local Camera      = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- ─────────────────────────────────────────────
+-- Drawing helpers
+-- ─────────────────────────────────────────────
+
+local function NewText(size)
+    local t        = Drawing.new("Text")
+    t.Visible      = false
+    t.Size         = size or 13
+    t.Center       = true
+    t.Outline      = true
+    t.OutlineColor = Color3.fromRGB(0, 0, 0)
+    t.Font         = Drawing.Fonts.Plex
+    return t
+end
+
+local function NewLine()
+    local l        = Drawing.new("Line")
+    l.Visible      = false
+    l.Transparency = 1
+    l.Thickness    = 1
+    return l
+end
+
+-- ─────────────────────────────────────────────
+-- Door helpers
+-- ─────────────────────────────────────────────
+
+-- Returns true if the door model contains a "Wall" part anywhere inside it
+local function DoorIsLocked(door)
+    return door:FindFirstChild("Wall", true) ~= nil
+end
+
+-- Gets the best BasePart adornee for a door Model
+local function GetAdornee(door)
+    if door:IsA("Model") then
+        -- Prefer the Door child's part, or PrimaryPart, or any BasePart
+        local innerDoor = door:FindFirstChild("Door")
+        if innerDoor then
+            if innerDoor:IsA("BasePart") then return innerDoor end
+            local bp = innerDoor:FindFirstChildWhichIsA("BasePart")
+            if bp then return bp end
+        end
+        return door.PrimaryPart or door:FindFirstChildWhichIsA("BasePart", true)
+    elseif door:IsA("BasePart") then
+        return door
+    end
+    return nil
+end
+
+-- Returns the colour pair and tag string for a room
+local function GetRoomInfo(roomName)
+    local n   = roomName:lower()
+    local cfg = getgenv().DoorESP
+
+    if n:find("start") then
+        return cfg.Colors.Start, cfg.LockedColors.Start, "START"
+    elseif n:find("boss") or n:find("end") then
+        return cfg.Colors.Boss,  cfg.LockedColors.Boss,  "BOSS"
+    elseif n:find("monster") then
+        return cfg.Colors.Monster, cfg.LockedColors.Monster, "MON"
+    end
+    return cfg.Colors.Default, cfg.LockedColors.Default, "ROOM"
+end
+
+-- ─────────────────────────────────────────────
+-- Cache:  door → { adornee, roomName, locked, label, tracer }
+-- ─────────────────────────────────────────────
+
+local DoorCache = {}
+
+local function RemoveDoor(door)
+    local d = DoorCache[door]
+    if d then
+        pcall(function() d.label:Remove()  end)
+        pcall(function() d.tracer:Remove() end)
+        DoorCache[door] = nil
+    end
+end
+
+local function HideDoor(door)
+    local d = DoorCache[door]
+    if d then
+        d.label.Visible  = false
+        d.tracer.Visible = false
+    end
+end
+
+-- ─────────────────────────────────────────────
+-- Main RenderStepped loop
+-- ─────────────────────────────────────────────
+
+RunService.RenderStepped:Connect(function()
+    local cfg      = getgenv().DoorESP
+    local char     = LocalPlayer.Character
+    local localHRP = char and char:FindFirstChild("HumanoidRootPart")
+
+    -- ── 1. Scan workspace.Dungeons for new door models ────────────
+    if cfg.Enabled and localHRP then
+        local dungeons = workspace:FindFirstChild("Dungeons")
+        if dungeons then
+            for _, dung in ipairs(dungeons:GetChildren()) do
+                -- Works for any Dungeon_Labyrinth_XXXX name
+                for _, room in ipairs(dung:GetChildren()) do
+                    local doorsFolder = room:FindFirstChild("Doors")
+                    if doorsFolder then
+                        for _, door in ipairs(doorsFolder:GetChildren()) do
+                            if not DoorCache[door] then
+                                local adornee = GetAdornee(door)
+                                if adornee then
+                                    local dist = (adornee.Position - localHRP.Position).Magnitude
+                                    if dist <= cfg.MaxDistance then
+                                        DoorCache[door] = {
+                                            adornee  = adornee,
+                                            roomName = room.Name,
+                                            locked   = DoorIsLocked(door),
+                                            label    = NewText(13),
+                                            tracer   = NewLine(),
+                                        }
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- ── 2. Find the closest OPEN (unlocked) door for the tracer ──
+    local closestOpen, minOpenDist = nil, math.huge
+    if localHRP then
+        for door, d in pairs(DoorCache) do
+            if door.Parent and d.adornee and d.adornee.Parent and not d.locked then
+                local dist = (d.adornee.Position - localHRP.Position).Magnitude
+                if dist < minOpenDist then
+                    minOpenDist = dist
+                    closestOpen = door
+                end
+            end
+        end
+    end
+
+    -- ── 3. Update every cached door ───────────────────────────────
+    for door, d in pairs(DoorCache) do
+        local stale = not door.Parent or not d.adornee or not d.adornee.Parent
+
+        if stale then
+            RemoveDoor(door)
+
+        elseif not cfg.Enabled or not localHRP then
+            HideDoor(door)
+
+        else
+            -- Re-check wall state every frame (Wall Destroyer may have removed it)
+            d.locked = DoorIsLocked(door)
+
+            local dist = (d.adornee.Position - localHRP.Position).Magnitude
+            if dist > cfg.MaxDistance then
+                HideDoor(door)
+            else
+                local pos, onScreen = Camera:WorldToViewportPoint(d.adornee.Position)
+                if not onScreen then
+                    HideDoor(door)
+                else
+                    local openColor, lockedColor, tag = GetRoomInfo(d.roomName)
+                    local scale = 1 / (d.adornee.Position - Camera.CFrame.Position).Magnitude * 100
+
+                    -- Pick colour based on locked state
+                    local color     = d.locked and lockedColor or openColor
+                    local statusTag = d.locked and (tag .. " [X]") or (tag .. " [O]")
+
+                    -- ── Label (shown for ALL doors) ─────────────────
+                    d.label.Visible = cfg.ShowLabels
+                    if cfg.ShowLabels then
+                        d.label.Text     = string.format("[ %s · %.0fm ]", statusTag, dist)
+                        d.label.Position = Vector2.new(
+                            pos.X,
+                            pos.Y - math.clamp(scale * 50, 20, 60) - 5
+                        )
+                        d.label.Color = color
+                        d.label.Size  = math.clamp(scale * 90, 11, 15)
+                    end
+
+                    -- ── Tracer (ONLY for open doors, closest one) ───
+                    local isClosestOpen = (door == closestOpen)
+                    d.tracer.Visible    = (not d.locked) and isClosestOpen
+
+                    if d.tracer.Visible then
+                        local vp           = Camera.ViewportSize
+                        d.tracer.From      = Vector2.new(vp.X * 0.5, vp.Y)
+                        d.tracer.To        = Vector2.new(pos.X, pos.Y)
+                        d.tracer.Color     = openColor   -- always full-bright for tracer
+                        d.tracer.Thickness = 1
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ─────────────────────────────────────────────
+-- Hide everything on respawn
+-- ─────────────────────────────────────────────
+
+LocalPlayer.CharacterRemoving:Connect(function()
+    for door in pairs(DoorCache) do
+        HideDoor(door)
+    end
+end)
