@@ -248,15 +248,14 @@ end
 --====================================================
 -- Create Object ESP
 --====================================================
-
-function ESP:createObject(obj,color)
-
-ESP:createBillboard(obj,color)
-ESP:createHighlight(obj,color)
-ESP:createTracer(obj,color)
-ESP:createBox(obj,color)
-ESP:createSkeleton(obj)
-
+function ESP:createObject(obj, color)
+    -- We check the GLOBAL settings table directly here
+    if Config.Settings.Highlight then ESP:createHighlight(obj, color) end
+    
+    ESP:createBillboard(obj, color)
+    ESP:createTracer(obj, color)
+    ESP:createBox(obj, color)
+    ESP:createSkeleton(obj)
 end
 
 --====================================================
@@ -276,6 +275,12 @@ end
 --====================================================
 function ESP:updateObject(obj, color)
     if isLocalPlayer(obj) then return end
+    
+    -- Check if master setting is even on (if you add an "Enabled" toggle)
+    if Config.Settings.Enabled == false then 
+        ESP:hide(obj)
+        return 
+    end
 
     local part = getPrimaryPart(obj)
     if not part then return end
@@ -283,14 +288,14 @@ function ESP:updateObject(obj, color)
     local dist = getDistance(part.Position)
     
     -- HARD CUTOFF
-    if dist > Settings.MaxDistance then
+    if dist > Config.Settings.MaxDistance then
         ESP:hide(obj)
         return
     end
 
-    if Settings.Rainbow then color = rainbow() end
-    local transparency = 1 - (dist / Settings.MaxDistance)
-    local scaleMult = math.clamp(1 - (dist / (Settings.MaxDistance * 1.5)), 0.5, 1)
+    if Config.Settings.Rainbow then color = rainbow() end
+    local transparency = 1 - (dist / Config.Settings.MaxDistance)
+    local scaleMult = math.clamp(1 - (dist / (Config.Settings.MaxDistance * 1.5)), 0.5, 1)
 
     -- Ensure objects exist
     if not ESP.Billboards[obj] then ESP:createObject(obj, color) end
@@ -302,28 +307,28 @@ function ESP:updateObject(obj, color)
         local text = name .. " [" .. math.floor(dist) .. "m]"
         
         local hum = obj:FindFirstChildOfClass("Humanoid")
-        if hum and isPlayerModel(obj) and Settings.HealthMode == "Number" then
+        if hum and isPlayerModel(obj) and Config.Settings.HealthMode == "Number" then
             text = text .. " | HP: " .. math.floor(hum.Health)
         end
 
         data.text.Text = text
         data.text.TextTransparency = 1 - transparency
         data.accent.BackgroundTransparency = 1 - transparency
-        data.bb.Enabled = true
+        data.bb.Enabled = true -- This stays on for the text
         
         local textWidth = measureText(text) * scaleMult
         data.bb.Size = UDim2.fromOffset(textWidth + 20, 34 * scaleMult)
-        data.text.TextSize = Settings.TextSize * scaleMult
+        data.text.TextSize = Config.Settings.TextSize * scaleMult
     end
 
-    -- 2. BOX & TRACER POSITIONING
-    local offsetPos = part.Position + Settings.StudsOffset
+    -- 2. BOX POSITIONING
+    local offsetPos = part.Position + Config.Settings.StudsOffset
     local screenPos, visible = Camera:WorldToViewportPoint(offsetPos)
 
-    -- Update Box
     local box = ESP.Boxes[obj]
     if box then
-        if visible then
+        -- TOGGLE CHECK: Only show if BoxESP is true in global settings
+        if visible and Config.Settings.BoxESP then
             local width = data.bb.AbsoluteSize.X
             local height = data.bb.AbsoluteSize.Y
             box.Size = Vector2.new(width, height)
@@ -336,10 +341,11 @@ function ESP:updateObject(obj, color)
         end
     end
 
-    -- Update Tracer (Pointing to the Billboard)
+    -- 3. TRACER POSITIONING
     local tracer = ESP.Tracers[obj]
     if tracer then
-        if visible and dist < (Settings.MaxDistance / 2) then
+        -- TOGGLE CHECK: Only show if Tracers is true in global settings
+        if visible and Config.Settings.Tracers and dist < (Config.Settings.MaxDistance / 2) then
             local screen = Camera.ViewportSize
             tracer.From = Vector2.new(screen.X/2, screen.Y)
             tracer.To = Vector2.new(screenPos.X, screenPos.Y + (data.bb.AbsoluteSize.Y / 2))
@@ -351,37 +357,44 @@ function ESP:updateObject(obj, color)
         end
     end
 
-    -- 3. SKELETON (Players)
+    -- 4. SKELETON
     local bones = ESP.Skeletons[obj]
-    if bones and isPlayerModel(obj) then
-        local connections = {
-            {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
-            {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
-            {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
-            {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
-            {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
-        }
-        
-        local count = 1
-        for _, joint in pairs(connections) do
-            local p1, p2 = obj:FindFirstChild(joint[1]), obj:FindFirstChild(joint[2])
-            if p1 and p2 and bones[count] then
-                local v1, vis1 = Camera:WorldToViewportPoint(p1.Position)
-                local v2, vis2 = Camera:WorldToViewportPoint(p2.Position)
-                if vis1 and vis2 then
-                    bones[count].Visible = true
-                    bones[count].From = Vector2.new(v1.X, v1.Y)
-                    bones[count].To = Vector2.new(v2.X, v2.Y)
-                    bones[count].Color = color
-                    bones[count].Transparency = transparency
-                else
-                    bones[count].Visible = false
+    if bones then
+        -- TOGGLE CHECK: Only show if SkeletonESP is true
+        if isPlayerModel(obj) and Config.Settings.SkeletonESP then
+            local connections = {
+                {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+                {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+                {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+                {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
+                {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+            }
+            
+            local count = 1
+            for _, joint in pairs(connections) do
+                local p1, p2 = obj:FindFirstChild(joint[1]), obj:FindFirstChild(joint[2])
+                if p1 and p2 and bones[count] then
+                    local v1, vis1 = Camera:WorldToViewportPoint(p1.Position)
+                    local v2, vis2 = Camera:WorldToViewportPoint(p2.Position)
+                    if vis1 and vis2 then
+                        bones[count].Visible = true
+                        bones[count].From = Vector2.new(v1.X, v1.Y)
+                        bones[count].To = Vector2.new(v2.X, v2.Y)
+                        bones[count].Color = color
+                        bones[count].Transparency = transparency
+                    else
+                        bones[count].Visible = false
+                    end
                 end
+                count = count + 1
             end
-            count = count + 1
+        else
+            for _, bone in pairs(bones) do bone.Visible = false end
         end
     end
 end
+
+
 
 --====================================================
 -- Remove (Fixed Typo & Added Drawing Cleanup)
