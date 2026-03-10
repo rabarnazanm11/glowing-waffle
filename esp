@@ -2,18 +2,24 @@ getgenv().ULTRA_ESP = {
 
     Settings = {
 
-        MaxDistance   = 1000,
+        MaxDistance      = 1000,
+        UnlimitedDistance = false,   -- when true, MaxDistance is ignored
+
         StudsOffset   = Vector3.new(0, 3.5, 0),
 
         TextSize      = 13,
-        DistanceScale = true,
+        DistanceScale = false,
 
-        BoxESP        = true,
-        SkeletonESP   = true,
-        Highlight     = true,
-        Tracers       = true,
+        Highlight     = false,
+        Tracers       = false,
 
-        HealthMode    = "Number", -- "Number" / "Off"
+        -- Health is always shown as a number.
+        -- ShowHealth   : whether to show HP at all
+        -- HealthLayout : "inline" → Name [Xm]  HP:100
+        --                "below"  → Name [Xm]
+        --                           HP: 100
+        ShowHealth    = false,
+        HealthLayout  = "inline",
 
         Rainbow       = false,
         PlayerColor   = Color3.fromRGB(120, 180, 255),
@@ -25,20 +31,20 @@ getgenv().ULTRA_ESP = {
             Name    = "Loot",
             Folder  = workspace:FindFirstChild("Loot"),
             Color   = Color3.fromRGB(80, 255, 120),
-            Enabled = true
+            Enabled = false
         },
         {
             Name    = "NPC",
             Folder  = workspace:FindFirstChild("NPCS"),
             Color   = Color3.fromRGB(255, 90, 90),
-            Enabled = true
+            Enabled = false
         }
     }
 
 }
 
 --====================================================
--- ULTRA ESP FRAMEWORK  (Skeleton + 3D Box Edition)
+-- ULTRA ESP FRAMEWORK
 --====================================================
 
 local Players     = game:GetService("Players")
@@ -51,35 +57,23 @@ local LocalPlayer = Players.LocalPlayer
 local Config   = getgenv().ULTRA_ESP
 local Settings = Config.Settings
 
---====================================================
--- External Libraries
---====================================================
-
-local SkeletonLib = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/Blissful4992/ESPs/main/UniversalSkeleton.lua"
-))()
-
---====================================================
--- ESP Tables
---====================================================
-
 local ESP = {
     Billboards     = {},
     Tracers        = {},
     Highlights     = {},
     ObjectCategory = {},
-
-    -- 3D box: per-object lists of Drawing lines/quads rebuilt each frame
-    BoxLines       = {},   -- [obj] = { Line, Line, ... }
-    BoxQuads       = {},   -- [obj] = { Quad, Quad, ... }
-
-    -- Skeleton: per-player skeleton objects from the library
-    Skeletons      = {},   -- [player] = skeleton
 }
+
+-- When unlimited is on we use this as the effective cap
+local INF = math.huge
 
 --====================================================
 -- Helpers
 --====================================================
+
+local function getEffectiveMaxDist()
+    return Settings.UnlimitedDistance and INF or Settings.MaxDistance
+end
 
 local function getRoot()
     local char = LocalPlayer.Character
@@ -111,178 +105,18 @@ local function rainbow()
     return Color3.fromHSV((tick() % 5) / 5, 1, 1)
 end
 
-local function measureText(text, scaledSize)
+local function measureText(text, size)
     return TextService:GetTextSize(
-        text, scaledSize, Enum.Font.GothamBold, Vector2.new(1000, 50)
-    ).X
-end
-
--- Returns the 8 world-space corners of a Part
-local function getCorners(part)
-    local cf   = part.CFrame
-    local half = part.Size / 2
-    local corners = {}
-    for x = -1, 1, 2 do
-        for y = -1, 1, 2 do
-            for z = -1, 1, 2 do
-                corners[#corners + 1] = (cf * CFrame.new(half * Vector3.new(x, y, z))).Position
-            end
-        end
-    end
-    return corners
-end
-
---====================================================
--- 3D Box Drawing
--- Creates Drawing objects for one frame, stored per-object.
--- Old ones are wiped and replaced each frame (clean rebuild pattern).
---====================================================
-
-local function clearBoxDrawings(obj)
-    if ESP.BoxLines[obj] then
-        for _, line in ipairs(ESP.BoxLines[obj]) do line:Remove() end
-        ESP.BoxLines[obj] = nil
-    end
-    if ESP.BoxQuads[obj] then
-        for _, quad in ipairs(ESP.BoxQuads[obj]) do quad:Remove() end
-        ESP.BoxQuads[obj] = nil
-    end
-end
-
-local function makeLine(lines, a, b, color, transparency)
-    local sa, visA = Camera:WorldToViewportPoint(a)
-    local sb, visB = Camera:WorldToViewportPoint(b)
-    if not visA and not visB then return end
-
-    local line = Drawing.new("Line")
-    line.Thickness   = 1.2
-    line.From        = Vector2.new(sa.X, sa.Y)
-    line.To          = Vector2.new(sb.X, sb.Y)
-    line.Color       = color
-    line.Transparency = transparency
-    line.ZIndex      = 1
-    line.Visible     = true
-    lines[#lines + 1] = line
-end
-
-local function makeQuad(quads, a, b, c, d, color, transparency)
-    local sa, visA = Camera:WorldToViewportPoint(a)
-    local sb, visB = Camera:WorldToViewportPoint(b)
-    local sc, visC = Camera:WorldToViewportPoint(c)
-    local sd, visD = Camera:WorldToViewportPoint(d)
-    if not visA and not visB and not visC and not visD then return end
-
-    local quad = Drawing.new("Quad")
-    quad.Thickness   = 0.5
-    quad.Color       = color
-    quad.Transparency = transparency
-    quad.ZIndex      = 1
-    quad.Filled      = true
-    quad.PointA      = Vector2.new(sa.X, sa.Y)
-    quad.PointB      = Vector2.new(sb.X, sb.Y)
-    quad.PointC      = Vector2.new(sc.X, sc.Y)
-    quad.PointD      = Vector2.new(sd.X, sd.Y)
-    quad.Visible     = true
-    quads[#quads + 1] = quad
-end
-
--- Draws a full 3D box around a part using its actual CFrame/Size.
--- For players we override size to a fixed humanoid silhouette.
-local function draw3DBox(obj, color, fillTransparency, isPlayer)
-    clearBoxDrawings(obj)
-    if not Settings.BoxESP then return end
-
-    local part = getPrimaryPart(obj)
-    if not part then return end
-
-    local dist = getDistance(part.Position)
-    if dist > Settings.MaxDistance then return end
-
-    -- Humanoid silhouette override so the box wraps the character body
-    local cf, sz
-    if isPlayer then
-        cf = part.CFrame * CFrame.new(0, -0.5, 0)
-        sz = Vector3.new(3, 5, 3)
-    else
-        cf = part.CFrame
-        sz = part.Size
-    end
-
-    local v = getCorners({ CFrame = cf, Size = sz })
-
-    local lines = {}
-    local quads = {}
-
-    local lineAlpha  = 1          -- fully opaque edges
-    local fillAlpha  = fillTransparency  -- semi-transparent faces
-
-    -- Bottom face  (v1 v2 v6 v5)
-    makeLine(lines, v[1], v[2], color, lineAlpha)
-    makeLine(lines, v[2], v[6], color, lineAlpha)
-    makeLine(lines, v[6], v[5], color, lineAlpha)
-    makeLine(lines, v[5], v[1], color, lineAlpha)
-    makeQuad(quads, v[1], v[2], v[6], v[5], color, fillAlpha)
-
-    -- Vertical edges
-    makeLine(lines, v[1], v[3], color, lineAlpha)
-    makeLine(lines, v[2], v[4], color, lineAlpha)
-    makeLine(lines, v[6], v[8], color, lineAlpha)
-    makeLine(lines, v[5], v[7], color, lineAlpha)
-
-    -- Side faces
-    makeQuad(quads, v[2], v[4], v[8], v[6], color, fillAlpha)
-    makeQuad(quads, v[1], v[2], v[4], v[3], color, fillAlpha)
-    makeQuad(quads, v[1], v[5], v[7], v[3], color, fillAlpha)
-    makeQuad(quads, v[5], v[7], v[8], v[6], color, fillAlpha)
-
-    -- Top face  (v3 v4 v8 v7)
-    makeLine(lines, v[3], v[4], color, lineAlpha)
-    makeLine(lines, v[4], v[8], color, lineAlpha)
-    makeLine(lines, v[8], v[7], color, lineAlpha)
-    makeLine(lines, v[7], v[3], color, lineAlpha)
-    makeQuad(quads, v[3], v[4], v[8], v[7], color, fillAlpha)
-
-    ESP.BoxLines[obj] = lines
-    ESP.BoxQuads[obj] = quads
-end
-
---====================================================
--- Skeleton (Library-based, players only)
---====================================================
-
-local function ensureSkeleton(player)
-    if ESP.Skeletons[player] then return end
-    local ok, skel = pcall(function()
-        return SkeletonLib:NewSkeleton(player, true)
-    end)
-    if ok and skel then
-        ESP.Skeletons[player] = skel
-    end
-end
-
-local function removeSkeleton(player)
-    local skel = ESP.Skeletons[player]
-    if not skel then return end
-    -- Most skeleton libs expose :Destroy() or :Remove()
-    if skel.Destroy then pcall(function() skel:Destroy() end)
-    elseif skel.Remove then pcall(function() skel:Remove() end) end
-    ESP.Skeletons[player] = nil
-end
-
-local function setSkeletonVisible(player, visible)
-    local skel = ESP.Skeletons[player]
-    if not skel then return end
-    -- Try common property names used by skeleton libraries
-    if skel.Enabled ~= nil then
-        skel.Enabled = visible
-    elseif skel.Visible ~= nil then
-        skel.Visible = visible
-    end
+        text, size, Enum.Font.GothamBold, Vector2.new(2000, 200)
+    )
 end
 
 --====================================================
 -- Billboard
 --====================================================
+
+local BB_H_LINE  = 20
+local BB_PADDING = 6
 
 function ESP:createBillboard(obj, color)
     local part = getPrimaryPart(obj)
@@ -292,7 +126,7 @@ function ESP:createBillboard(obj, color)
     bb.Adornee     = part
     bb.AlwaysOnTop = true
     bb.StudsOffset = Settings.StudsOffset
-    bb.Size        = UDim2.fromOffset(120, 34)
+    bb.Size        = UDim2.fromOffset(160, BB_H_LINE + BB_PADDING * 2)
     bb.Parent      = CoreGui
 
     local frame = Instance.new("Frame", bb)
@@ -306,17 +140,41 @@ function ESP:createBillboard(obj, color)
     accent.BackgroundColor3 = color
     accent.BorderSizePixel  = 0
 
-    local text = Instance.new("TextLabel", frame)
-    text.BackgroundTransparency = 1
-    text.Size               = UDim2.new(1, -10, 1, 0)
-    text.Position           = UDim2.new(0, 6, 0, 0)
-    text.Font               = Enum.Font.GothamBold
-    text.TextSize           = Settings.TextSize
-    text.TextXAlignment     = Enum.TextXAlignment.Left
-    text.TextStrokeTransparency = 0
-    text.TextColor3         = Color3.new(1, 1, 1)
+    -- Main label: name + distance (+ HP if inline)
+    local mainLabel = Instance.new("TextLabel", frame)
+    mainLabel.Name                   = "MainLabel"
+    mainLabel.BackgroundTransparency = 1
+    mainLabel.Size                   = UDim2.new(1, -10, 0, BB_H_LINE)
+    mainLabel.Position               = UDim2.new(0, 6, 0, BB_PADDING)
+    mainLabel.Font                   = Enum.Font.GothamBold
+    mainLabel.TextSize               = Settings.TextSize
+    mainLabel.TextXAlignment         = Enum.TextXAlignment.Left
+    mainLabel.TextStrokeTransparency = 0
+    mainLabel.TextColor3             = Color3.new(1, 1, 1)
+    mainLabel.TextWrapped            = false
 
-    ESP.Billboards[obj] = { bb = bb, text = text, accent = accent }
+    -- Health label: only visible in "below" layout
+    local healthLabel = Instance.new("TextLabel", frame)
+    healthLabel.Name                   = "HealthLabel"
+    healthLabel.BackgroundTransparency = 1
+    healthLabel.Size                   = UDim2.new(1, -10, 0, BB_H_LINE)
+    healthLabel.Position               = UDim2.new(0, 6, 0, BB_PADDING + BB_H_LINE)
+    healthLabel.Font                   = Enum.Font.GothamBold
+    healthLabel.TextSize               = Settings.TextSize - 1
+    healthLabel.TextXAlignment         = Enum.TextXAlignment.Left
+    healthLabel.TextStrokeTransparency = 0
+    healthLabel.TextColor3             = Color3.fromRGB(120, 230, 120)
+    healthLabel.Text                   = ""
+    healthLabel.Visible                = false
+    healthLabel.TextWrapped            = false
+
+    ESP.Billboards[obj] = {
+        bb          = bb,
+        frame       = frame,
+        accent      = accent,
+        mainLabel   = mainLabel,
+        healthLabel = healthLabel,
+    }
 end
 
 --====================================================
@@ -348,30 +206,20 @@ function ESP:createTracer(obj, color)
 end
 
 --====================================================
--- Full Create
+-- Create / Hide / Remove
 --====================================================
 
 function ESP:createObject(obj, color)
     ESP:createBillboard(obj, color)
     ESP:createHighlight(obj, color)
     ESP:createTracer(obj, color)
-    -- Box is rebuilt each frame — no persistent create needed
 end
-
---====================================================
--- Hide
---====================================================
 
 function ESP:hide(obj)
     if ESP.Billboards[obj] then ESP.Billboards[obj].bb.Enabled = false end
-    if ESP.Tracers[obj]    then ESP.Tracers[obj].Visible = false end
-    if ESP.Highlights[obj] then ESP.Highlights[obj].Enabled = false end
-    clearBoxDrawings(obj)
+    if ESP.Tracers[obj]    then ESP.Tracers[obj].Visible       = false end
+    if ESP.Highlights[obj] then ESP.Highlights[obj].Enabled    = false end
 end
-
---====================================================
--- Remove & Destroy
---====================================================
 
 function ESP:remove(obj)
     if ESP.Billboards[obj] then
@@ -386,7 +234,6 @@ function ESP:remove(obj)
         ESP.Tracers[obj]:Remove()
         ESP.Tracers[obj] = nil
     end
-    clearBoxDrawings(obj)
     ESP.ObjectCategory[obj] = nil
 end
 
@@ -400,51 +247,80 @@ function ESP:updateObject(obj, color)
     local part = getPrimaryPart(obj)
     if not part then return end
 
-    local dist = getDistance(part.Position)
+    local dist    = getDistance(part.Position)
+    local maxDist = getEffectiveMaxDist()
 
-    if dist > Settings.MaxDistance then
+    if dist > maxDist then
         ESP:hide(obj)
         return
     end
 
     if Settings.Rainbow then color = rainbow() end
 
-    local transparency = 1 - (dist / Settings.MaxDistance)
-    local scaleMult    = Settings.DistanceScale
-        and math.clamp(1 - (dist / (Settings.MaxDistance * 1.5)), 0.5, 1)
-        or 1
+    -- Transparency: when unlimited, fade starts at 2000 studs so distant tags
+    -- don't become invisible at extreme range
+    local fadeBase    = Settings.UnlimitedDistance and 2000 or maxDist
+    local transparency = math.clamp(1 - (dist / fadeBase), 0.15, 1)
+
+    local scaleMult = Settings.DistanceScale
+        and math.clamp(1 - (dist / (math.min(maxDist, 2000) * 1.5)), 0.5, 1)
+        or  1
 
     if not ESP.Billboards[obj] then ESP:createObject(obj, color) end
 
-    -- 1. Billboard
+    -- ── Billboard ──────────────────────────────────────────────────────────
+
     local data = ESP.Billboards[obj]
     if data then
-        local playerObj = Players:GetPlayerFromCharacter(obj)
-        local name      = playerObj and playerObj.Name or obj.Name
-        local labelText = name .. " [" .. math.floor(dist) .. "m]"
+        local playerObj    = Players:GetPlayerFromCharacter(obj)
+        local name         = playerObj and playerObj.Name or obj.Name
+        local hum          = obj:FindFirstChildOfClass("Humanoid")
+        local hpValue      = (hum and Settings.ShowHealth) and math.floor(hum.Health) or nil
+        local scaledSize   = Settings.TextSize * scaleMult
+        local useBelow     = hpValue ~= nil and Settings.HealthLayout == "below"
 
-        local hum = obj:FindFirstChildOfClass("Humanoid")
-        if hum and isPlayerModel(obj) and Settings.HealthMode == "Number" then
-            labelText = labelText .. "  HP:" .. math.floor(hum.Health)
+        -- Build main line text
+        local mainText = name .. " [" .. math.floor(dist) .. "m]"
+        if hpValue and Settings.HealthLayout == "inline" then
+            mainText = mainText .. "  HP:" .. hpValue
         end
 
-        local scaledTextSize = Settings.TextSize * scaleMult
-        local textWidth      = measureText(labelText, scaledTextSize) * scaleMult
+        -- Measure and resize billboard
+        local textVec     = measureText(mainText, scaledSize)
+        local bbWidth     = math.max(textVec.X + 20, 80)
+        local totalHeight = useBelow
+            and (BB_H_LINE * 2 * scaleMult + BB_PADDING * 2)
+            or  (BB_H_LINE     * scaleMult + BB_PADDING * 2)
 
-        data.text.Text                     = labelText
-        data.text.TextSize                 = scaledTextSize
-        data.text.TextTransparency         = 1 - transparency
+        data.bb.Size    = UDim2.fromOffset(bbWidth, totalHeight)
+        data.bb.Enabled = true
+
+        -- Main label
+        data.mainLabel.Text             = mainText
+        data.mainLabel.TextSize         = scaledSize
+        data.mainLabel.TextTransparency = 1 - transparency
+        data.mainLabel.Size             = UDim2.new(1, -10, 0, BB_H_LINE * scaleMult)
+        data.mainLabel.Position         = UDim2.new(0, 6, 0, BB_PADDING)
+
+        -- Health label (below)
+        if useBelow then
+            local hpScaledSize = (Settings.TextSize - 1) * scaleMult
+            data.healthLabel.Text             = "HP: " .. hpValue
+            data.healthLabel.TextSize         = hpScaledSize
+            data.healthLabel.TextTransparency = 1 - transparency
+            data.healthLabel.Size             = UDim2.new(1, -10, 0, BB_H_LINE * scaleMult)
+            data.healthLabel.Position         = UDim2.new(0, 6, 0, BB_PADDING + BB_H_LINE * scaleMult)
+            data.healthLabel.Visible          = true
+        else
+            data.healthLabel.Visible = false
+        end
+
         data.accent.BackgroundColor3       = color
         data.accent.BackgroundTransparency = 1 - transparency
-        data.bb.Size                       = UDim2.fromOffset(textWidth + 20, 34 * scaleMult)
-        data.bb.Enabled                    = true
     end
 
-    local viewportSize        = Camera.ViewportSize
-    local offsetPos           = part.Position + Settings.StudsOffset
-    local screenPos, onScreen = Camera:WorldToViewportPoint(offsetPos)
+    -- ── Highlight ──────────────────────────────────────────────────────────
 
-    -- 2. Highlight
     local hl = ESP.Highlights[obj]
     if hl then
         if Settings.Highlight then
@@ -456,19 +332,18 @@ function ESP:updateObject(obj, color)
         end
     end
 
-    -- 3. 3D Box (rebuilt fresh each frame)
-    if Settings.BoxESP then
-        draw3DBox(obj, color, 0.82, isPlayerModel(obj))
-    else
-        clearBoxDrawings(obj)
-    end
+    -- ── Tracer ─────────────────────────────────────────────────────────────
 
-    -- 4. Tracer
-    local tracer = ESP.Tracers[obj]
+    local tracer    = ESP.Tracers[obj]
+    local viewSize  = Camera.ViewportSize
+    local offsetPos = part.Position + Settings.StudsOffset
+    local screenPos, onScreen = Camera:WorldToViewportPoint(offsetPos)
+
     if tracer then
-        if onScreen and Settings.Tracers and dist < (Settings.MaxDistance / 2) and data then
-            tracer.From         = Vector2.new(viewportSize.X / 2, viewportSize.Y)
-            tracer.To           = Vector2.new(screenPos.X, screenPos.Y + data.bb.AbsoluteSize.Y / 2)
+        local tracerDist = Settings.UnlimitedDistance and INF or (maxDist / 2)
+        if onScreen and Settings.Tracers and dist < tracerDist and data then
+            tracer.From         = Vector2.new(viewSize.X / 2, viewSize.Y)
+            tracer.To           = Vector2.new(screenPos.X, screenPos.Y)
             tracer.Color        = color
             tracer.Transparency = (1 - transparency) * 0.4
             tracer.Visible      = true
@@ -482,30 +357,9 @@ end
 -- Main Loop
 --====================================================
 
--- Pre-create skeletons for already-connected players
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then
-        ensureSkeleton(player)
-    end
-end
-
-Players.PlayerAdded:Connect(function(player)
-    if player ~= LocalPlayer then
-        ensureSkeleton(player)
-    end
-end)
-
-Players.PlayerRemoving:Connect(function(player)
-    removeSkeleton(player)
-    -- Also clean up any ESP objects for this character
-    if player.Character then
-        ESP:remove(player.Character)
-    end
-end)
-
 RunService.RenderStepped:Connect(function()
 
-    -- 1. Category objects (Loot, NPCs, etc.)
+    -- 1. Categories
     for _, cat in ipairs(Config.Categories) do
         if cat.Folder and cat.Folder.Parent then
             for _, obj in ipairs(cat.Folder:GetChildren()) do
@@ -513,7 +367,6 @@ RunService.RenderStepped:Connect(function()
                     ESP.ObjectCategory[obj] = cat.Name
                     ESP:updateObject(obj, cat.Color)
                 else
-                    -- Actively hide when category is toggled off
                     ESP:hide(obj)
                 end
             end
@@ -528,16 +381,11 @@ RunService.RenderStepped:Connect(function()
         then
             local color = Settings.Rainbow and rainbow()
                 or (Settings.PlayerColor or Color3.fromRGB(120, 180, 255))
-
             ESP:updateObject(player.Character, color)
-
-            -- Skeleton toggle (library handles rendering internally)
-            ensureSkeleton(player)
-            setSkeletonVisible(player, Settings.SkeletonESP)
         end
     end
 
-    -- 3. Stale-object cleanup
+    -- 3. Stale cleanup
     for obj in pairs(ESP.Billboards) do
         if not (obj and obj.Parent and obj:IsDescendantOf(workspace)) then
             ESP:remove(obj)
