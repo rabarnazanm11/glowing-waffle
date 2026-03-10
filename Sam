@@ -3685,7 +3685,7 @@ Window.FloatButton = FloatButton
                     TextSize = 16
                 }):AddToTheme({TextColor3 = 'Text'})
                 
-                Items["Background"] = Instances:Create("Frame", {
+                
                     Items["Background"] = Instances:Create("Frame", {
     Parent = Items["Textbox"].Instance,
     Name = "\0",
