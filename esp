@@ -2,46 +2,43 @@ getgenv().ULTRA_ESP = {
 
     Settings = {
 
-        MaxDistance    = 1000,
-        StudsOffset    = Vector3.new(0, 3.5, 0),
+        MaxDistance   = 1000,
+        StudsOffset   = Vector3.new(0, 3.5, 0),
 
-        TextSize       = 13,
-        DistanceScale  = true,
+        TextSize      = 13,
+        DistanceScale = true,
 
-        BoxESP         = true,
-        SkeletonESP    = true,
-        Highlight      = true,
-        Tracers        = true,
+        BoxESP        = true,
+        SkeletonESP   = true,
+        Highlight     = true,
+        Tracers       = true,
 
-        HealthMode     = "Number", -- "Number" / "Bar" / "Off"
+        HealthMode    = "Number", -- "Number" / "Off"
 
-        Rainbow        = false,
-        PlayerColor    = Color3.fromRGB(120, 180, 255),
+        Rainbow       = false,
+        PlayerColor   = Color3.fromRGB(120, 180, 255),
 
     },
 
     Categories = {
-
         {
             Name    = "Loot",
             Folder  = workspace:FindFirstChild("Loot"),
             Color   = Color3.fromRGB(80, 255, 120),
             Enabled = true
         },
-
         {
             Name    = "NPC",
             Folder  = workspace:FindFirstChild("NPCS"),
             Color   = Color3.fromRGB(255, 90, 90),
             Enabled = true
         }
-
     }
 
 }
 
 --====================================================
--- ULTRA ESP FRAMEWORK
+-- ULTRA ESP FRAMEWORK  (Skeleton + 3D Box Edition)
 --====================================================
 
 local Players     = game:GetService("Players")
@@ -49,30 +46,36 @@ local RunService  = game:GetService("RunService")
 local CoreGui     = game:GetService("CoreGui")
 local TextService = game:GetService("TextService")
 local Camera      = workspace.CurrentCamera
-
 local LocalPlayer = Players.LocalPlayer
 
 local Config   = getgenv().ULTRA_ESP
 local Settings = Config.Settings
 
+--====================================================
+-- External Libraries
+--====================================================
+
+local SkeletonLib = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/Blissful4992/ESPs/main/UniversalSkeleton.lua"
+))()
+
+--====================================================
+-- ESP Tables
+--====================================================
+
 local ESP = {
     Billboards     = {},
-    Boxes          = {},
     Tracers        = {},
-    Skeletons      = {},
     Highlights     = {},
-    ObjectCategory = {}  -- tracks which category each object belongs to
-}
+    ObjectCategory = {},
 
-local SKELETON_CONNECTIONS = {
-    {"Head",       "UpperTorso"},
-    {"UpperTorso", "LowerTorso"},
-    {"UpperTorso",  "LeftUpperArm"},  {"LeftUpperArm",  "LeftLowerArm"},  {"LeftLowerArm",  "LeftHand"},
-    {"UpperTorso",  "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
-    {"LowerTorso",  "LeftUpperLeg"},  {"LeftUpperLeg",  "LeftLowerLeg"},  {"LeftLowerLeg",  "LeftFoot"},
-    {"LowerTorso",  "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+    -- 3D box: per-object lists of Drawing lines/quads rebuilt each frame
+    BoxLines       = {},   -- [obj] = { Line, Line, ... }
+    BoxQuads       = {},   -- [obj] = { Quad, Quad, ... }
+
+    -- Skeleton: per-player skeleton objects from the library
+    Skeletons      = {},   -- [player] = skeleton
 }
-local BONE_COUNT = #SKELETON_CONNECTIONS -- 14
 
 --====================================================
 -- Helpers
@@ -114,8 +117,171 @@ local function measureText(text, scaledSize)
     ).X
 end
 
+-- Returns the 8 world-space corners of a Part
+local function getCorners(part)
+    local cf   = part.CFrame
+    local half = part.Size / 2
+    local corners = {}
+    for x = -1, 1, 2 do
+        for y = -1, 1, 2 do
+            for z = -1, 1, 2 do
+                corners[#corners + 1] = (cf * CFrame.new(half * Vector3.new(x, y, z))).Position
+            end
+        end
+    end
+    return corners
+end
+
 --====================================================
--- Create Elements
+-- 3D Box Drawing
+-- Creates Drawing objects for one frame, stored per-object.
+-- Old ones are wiped and replaced each frame (clean rebuild pattern).
+--====================================================
+
+local function clearBoxDrawings(obj)
+    if ESP.BoxLines[obj] then
+        for _, line in ipairs(ESP.BoxLines[obj]) do line:Remove() end
+        ESP.BoxLines[obj] = nil
+    end
+    if ESP.BoxQuads[obj] then
+        for _, quad in ipairs(ESP.BoxQuads[obj]) do quad:Remove() end
+        ESP.BoxQuads[obj] = nil
+    end
+end
+
+local function makeLine(lines, a, b, color, transparency)
+    local sa, visA = Camera:WorldToViewportPoint(a)
+    local sb, visB = Camera:WorldToViewportPoint(b)
+    if not visA and not visB then return end
+
+    local line = Drawing.new("Line")
+    line.Thickness   = 1.2
+    line.From        = Vector2.new(sa.X, sa.Y)
+    line.To          = Vector2.new(sb.X, sb.Y)
+    line.Color       = color
+    line.Transparency = transparency
+    line.ZIndex      = 1
+    line.Visible     = true
+    lines[#lines + 1] = line
+end
+
+local function makeQuad(quads, a, b, c, d, color, transparency)
+    local sa, visA = Camera:WorldToViewportPoint(a)
+    local sb, visB = Camera:WorldToViewportPoint(b)
+    local sc, visC = Camera:WorldToViewportPoint(c)
+    local sd, visD = Camera:WorldToViewportPoint(d)
+    if not visA and not visB and not visC and not visD then return end
+
+    local quad = Drawing.new("Quad")
+    quad.Thickness   = 0.5
+    quad.Color       = color
+    quad.Transparency = transparency
+    quad.ZIndex      = 1
+    quad.Filled      = true
+    quad.PointA      = Vector2.new(sa.X, sa.Y)
+    quad.PointB      = Vector2.new(sb.X, sb.Y)
+    quad.PointC      = Vector2.new(sc.X, sc.Y)
+    quad.PointD      = Vector2.new(sd.X, sd.Y)
+    quad.Visible     = true
+    quads[#quads + 1] = quad
+end
+
+-- Draws a full 3D box around a part using its actual CFrame/Size.
+-- For players we override size to a fixed humanoid silhouette.
+local function draw3DBox(obj, color, fillTransparency, isPlayer)
+    clearBoxDrawings(obj)
+    if not Settings.BoxESP then return end
+
+    local part = getPrimaryPart(obj)
+    if not part then return end
+
+    local dist = getDistance(part.Position)
+    if dist > Settings.MaxDistance then return end
+
+    -- Humanoid silhouette override so the box wraps the character body
+    local cf, sz
+    if isPlayer then
+        cf = part.CFrame * CFrame.new(0, -0.5, 0)
+        sz = Vector3.new(3, 5, 3)
+    else
+        cf = part.CFrame
+        sz = part.Size
+    end
+
+    local v = getCorners({ CFrame = cf, Size = sz })
+
+    local lines = {}
+    local quads = {}
+
+    local lineAlpha  = 1          -- fully opaque edges
+    local fillAlpha  = fillTransparency  -- semi-transparent faces
+
+    -- Bottom face  (v1 v2 v6 v5)
+    makeLine(lines, v[1], v[2], color, lineAlpha)
+    makeLine(lines, v[2], v[6], color, lineAlpha)
+    makeLine(lines, v[6], v[5], color, lineAlpha)
+    makeLine(lines, v[5], v[1], color, lineAlpha)
+    makeQuad(quads, v[1], v[2], v[6], v[5], color, fillAlpha)
+
+    -- Vertical edges
+    makeLine(lines, v[1], v[3], color, lineAlpha)
+    makeLine(lines, v[2], v[4], color, lineAlpha)
+    makeLine(lines, v[6], v[8], color, lineAlpha)
+    makeLine(lines, v[5], v[7], color, lineAlpha)
+
+    -- Side faces
+    makeQuad(quads, v[2], v[4], v[8], v[6], color, fillAlpha)
+    makeQuad(quads, v[1], v[2], v[4], v[3], color, fillAlpha)
+    makeQuad(quads, v[1], v[5], v[7], v[3], color, fillAlpha)
+    makeQuad(quads, v[5], v[7], v[8], v[6], color, fillAlpha)
+
+    -- Top face  (v3 v4 v8 v7)
+    makeLine(lines, v[3], v[4], color, lineAlpha)
+    makeLine(lines, v[4], v[8], color, lineAlpha)
+    makeLine(lines, v[8], v[7], color, lineAlpha)
+    makeLine(lines, v[7], v[3], color, lineAlpha)
+    makeQuad(quads, v[3], v[4], v[8], v[7], color, fillAlpha)
+
+    ESP.BoxLines[obj] = lines
+    ESP.BoxQuads[obj] = quads
+end
+
+--====================================================
+-- Skeleton (Library-based, players only)
+--====================================================
+
+local function ensureSkeleton(player)
+    if ESP.Skeletons[player] then return end
+    local ok, skel = pcall(function()
+        return SkeletonLib:NewSkeleton(player, true)
+    end)
+    if ok and skel then
+        ESP.Skeletons[player] = skel
+    end
+end
+
+local function removeSkeleton(player)
+    local skel = ESP.Skeletons[player]
+    if not skel then return end
+    -- Most skeleton libs expose :Destroy() or :Remove()
+    if skel.Destroy then pcall(function() skel:Destroy() end)
+    elseif skel.Remove then pcall(function() skel:Remove() end) end
+    ESP.Skeletons[player] = nil
+end
+
+local function setSkeletonVisible(player, visible)
+    local skel = ESP.Skeletons[player]
+    if not skel then return end
+    -- Try common property names used by skeleton libraries
+    if skel.Enabled ~= nil then
+        skel.Enabled = visible
+    elseif skel.Visible ~= nil then
+        skel.Visible = visible
+    end
+end
+
+--====================================================
+-- Billboard
 --====================================================
 
 function ESP:createBillboard(obj, color)
@@ -133,9 +299,7 @@ function ESP:createBillboard(obj, color)
     frame.Size             = UDim2.fromScale(1, 1)
     frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     frame.BorderSizePixel  = 0
-
-    local corner = Instance.new("UICorner", frame)
-    corner.CornerRadius = UDim.new(0, 8)
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
     local accent = Instance.new("Frame", frame)
     accent.Size             = UDim2.new(0, 3, 1, 0)
@@ -155,6 +319,10 @@ function ESP:createBillboard(obj, color)
     ESP.Billboards[obj] = { bb = bb, text = text, accent = accent }
 end
 
+--====================================================
+-- Highlight
+--====================================================
+
 function ESP:createHighlight(obj, color)
     local hl = Instance.new("Highlight")
     hl.Adornee             = obj
@@ -167,6 +335,10 @@ function ESP:createHighlight(obj, color)
     ESP.Highlights[obj]    = hl
 end
 
+--====================================================
+-- Tracer
+--====================================================
+
 function ESP:createTracer(obj, color)
     local line       = Drawing.new("Line")
     line.Thickness   = 2
@@ -175,44 +347,26 @@ function ESP:createTracer(obj, color)
     ESP.Tracers[obj] = line
 end
 
-function ESP:createBox(obj, color)
-    local box      = Drawing.new("Square")
-    box.Thickness  = 2
-    box.Filled     = false
-    box.Color      = color
-    ESP.Boxes[obj] = box
-end
-
-function ESP:createSkeleton(obj)
-    if not isPlayerModel(obj) then return end
-    local bones = {}
-    for i = 1, BONE_COUNT do
-        bones[i]           = Drawing.new("Line")
-        bones[i].Thickness = 2
-    end
-    ESP.Skeletons[obj] = bones
-end
+--====================================================
+-- Full Create
+--====================================================
 
 function ESP:createObject(obj, color)
     ESP:createBillboard(obj, color)
     ESP:createHighlight(obj, color)
     ESP:createTracer(obj, color)
-    ESP:createBox(obj, color)
-    ESP:createSkeleton(obj)
+    -- Box is rebuilt each frame — no persistent create needed
 end
 
 --====================================================
--- Hide  (visually suppress — keeps Drawing objects alive)
+-- Hide
 --====================================================
 
 function ESP:hide(obj)
     if ESP.Billboards[obj] then ESP.Billboards[obj].bb.Enabled = false end
-    if ESP.Boxes[obj]      then ESP.Boxes[obj].Visible        = false end
-    if ESP.Tracers[obj]    then ESP.Tracers[obj].Visible      = false end
-    if ESP.Highlights[obj] then ESP.Highlights[obj].Enabled   = false end
-    if ESP.Skeletons[obj]  then
-        for _, bone in ipairs(ESP.Skeletons[obj]) do bone.Visible = false end
-    end
+    if ESP.Tracers[obj]    then ESP.Tracers[obj].Visible = false end
+    if ESP.Highlights[obj] then ESP.Highlights[obj].Enabled = false end
+    clearBoxDrawings(obj)
 end
 
 --====================================================
@@ -232,14 +386,7 @@ function ESP:remove(obj)
         ESP.Tracers[obj]:Remove()
         ESP.Tracers[obj] = nil
     end
-    if ESP.Boxes[obj] then
-        ESP.Boxes[obj]:Remove()
-        ESP.Boxes[obj] = nil
-    end
-    if ESP.Skeletons[obj] then
-        for _, line in ipairs(ESP.Skeletons[obj]) do line:Remove() end
-        ESP.Skeletons[obj] = nil
-    end
+    clearBoxDrawings(obj)
     ESP.ObjectCategory[obj] = nil
 end
 
@@ -265,7 +412,7 @@ function ESP:updateObject(obj, color)
     local transparency = 1 - (dist / Settings.MaxDistance)
     local scaleMult    = Settings.DistanceScale
         and math.clamp(1 - (dist / (Settings.MaxDistance * 1.5)), 0.5, 1)
-        or  1
+        or 1
 
     if not ESP.Billboards[obj] then ESP:createObject(obj, color) end
 
@@ -309,20 +456,11 @@ function ESP:updateObject(obj, color)
         end
     end
 
-    -- 3. Box
-    local box = ESP.Boxes[obj]
-    if box then
-        if onScreen and Settings.BoxESP and data then
-            local w = data.bb.AbsoluteSize.X
-            local h = data.bb.AbsoluteSize.Y
-            box.Size         = Vector2.new(w, h)
-            box.Position     = Vector2.new(screenPos.X - w / 2, screenPos.Y - h / 2)
-            box.Color        = color
-            box.Transparency = 1 - transparency
-            box.Visible      = true
-        else
-            box.Visible = false
-        end
+    -- 3. 3D Box (rebuilt fresh each frame)
+    if Settings.BoxESP then
+        draw3DBox(obj, color, 0.82, isPlayerModel(obj))
+    else
+        clearBoxDrawings(obj)
     end
 
     -- 4. Tracer
@@ -338,38 +476,32 @@ function ESP:updateObject(obj, color)
             tracer.Visible = false
         end
     end
-
-    -- 5. Skeleton
-    local bones = ESP.Skeletons[obj]
-    if bones then
-        if isPlayerModel(obj) and Settings.SkeletonESP then
-            for i, joint in ipairs(SKELETON_CONNECTIONS) do
-                local p1   = obj:FindFirstChild(joint[1])
-                local p2   = obj:FindFirstChild(joint[2])
-                local bone = bones[i]
-                if p1 and p2 and bone then
-                    local v1, vis1 = Camera:WorldToViewportPoint(p1.Position)
-                    local v2, vis2 = Camera:WorldToViewportPoint(p2.Position)
-                    if vis1 and vis2 then
-                        bone.From         = Vector2.new(v1.X, v1.Y)
-                        bone.To           = Vector2.new(v2.X, v2.Y)
-                        bone.Color        = color
-                        bone.Transparency = 1 - transparency
-                        bone.Visible      = true
-                    else
-                        bone.Visible = false
-                    end
-                end
-            end
-        else
-            for _, bone in ipairs(bones) do bone.Visible = false end
-        end
-    end
 end
 
 --====================================================
 -- Main Loop
 --====================================================
+
+-- Pre-create skeletons for already-connected players
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        ensureSkeleton(player)
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        ensureSkeleton(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    removeSkeleton(player)
+    -- Also clean up any ESP objects for this character
+    if player.Character then
+        ESP:remove(player.Character)
+    end
+end)
 
 RunService.RenderStepped:Connect(function()
 
@@ -381,9 +513,7 @@ RunService.RenderStepped:Connect(function()
                     ESP.ObjectCategory[obj] = cat.Name
                     ESP:updateObject(obj, cat.Color)
                 else
-                    -- THE FIX: when a category is toggled OFF,
-                    -- actively hide every object in it every frame.
-                    -- Without this the last-drawn frame stays frozen on screen.
+                    -- Actively hide when category is toggled off
                     ESP:hide(obj)
                 end
             end
@@ -396,14 +526,18 @@ RunService.RenderStepped:Connect(function()
             and player.Character
             and player.Character:FindFirstChild("HumanoidRootPart")
         then
-            ESP:updateObject(
-                player.Character,
-                Settings.PlayerColor or Color3.fromRGB(120, 180, 255)
-            )
+            local color = Settings.Rainbow and rainbow()
+                or (Settings.PlayerColor or Color3.fromRGB(120, 180, 255))
+
+            ESP:updateObject(player.Character, color)
+
+            -- Skeleton toggle (library handles rendering internally)
+            ensureSkeleton(player)
+            setSkeletonVisible(player, Settings.SkeletonESP)
         end
     end
 
-    -- 3. Stale-object cleanup (prevents ghost tracers / bunching)
+    -- 3. Stale-object cleanup
     for obj in pairs(ESP.Billboards) do
         if not (obj and obj.Parent and obj:IsDescendantOf(workspace)) then
             ESP:remove(obj)
