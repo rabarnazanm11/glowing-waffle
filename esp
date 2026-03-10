@@ -1,0 +1,451 @@
+getgenv().ULTRA_ESP = {
+
+Settings = {
+
+MaxDistance = 1000,
+StudsOffset = Vector3.new(0,3.5,0),
+
+TextSize = 13,
+DistanceScale = true,
+
+BoxESP = true,
+SkeletonESP = true,
+Highlight = true,
+Tracers = true,
+
+HealthMode = "Number", -- "Bar" or "Number"
+
+Rainbow = false
+
+},
+
+Categories = {
+
+{
+Name = "Loot",
+Folder = workspace:FindFirstChild("Loot"),
+Color = Color3.fromRGB(80,255,120),
+Enabled = true
+},
+
+{
+Name = "NPC",
+Folder = workspace:FindFirstChild("NPCS"),
+Color = Color3.fromRGB(255,90,90),
+Enabled = true
+}
+
+}
+
+}
+
+--====================================================
+-- ULTRA ESP FRAMEWORK
+--====================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local Camera = workspace.CurrentCamera
+local TextService = game:GetService("TextService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local Config = getgenv().ULTRA_ESP
+local Settings = Config.Settings
+
+local ESP = {
+Billboards = {},
+Boxes = {},
+Tracers = {},
+Skeletons = {},
+Highlights = {}
+}
+
+--====================================================
+-- Helpers
+--====================================================
+
+local function getRoot()
+
+local char = LocalPlayer.Character
+if not char then return end
+
+return char:FindFirstChild("HumanoidRootPart")
+
+end
+
+local function getPrimaryPart(obj)
+
+if obj:IsA("BasePart") then return obj end
+if obj.PrimaryPart then return obj.PrimaryPart end
+
+return obj:FindFirstChildWhichIsA("BasePart",true)
+
+end
+
+local function getDistance(pos)
+
+local root = getRoot()
+if not root then return 0 end
+
+return (root.Position-pos).Magnitude
+
+end
+
+local function isPlayerModel(model)
+
+return Players:GetPlayerFromCharacter(model) ~= nil
+
+end
+
+local function isLocalPlayer(model)
+
+local player = Players:GetPlayerFromCharacter(model)
+return player == LocalPlayer
+
+end
+
+local function rainbow()
+
+return Color3.fromHSV((tick()%5)/5,1,1)
+
+end
+local function measureText(text)
+
+local size = TextService:GetTextSize(
+text,
+Settings.TextSize,
+Enum.Font.GothamBold,
+Vector2.new(1000,50)
+)
+
+return size.X
+
+end
+--====================================================
+-- Styled Billboard
+--====================================================
+
+function ESP:createBillboard(obj,color)
+
+local part = getPrimaryPart(obj)
+if not part then return end
+
+local bb = Instance.new("BillboardGui")
+bb.Adornee = part
+bb.AlwaysOnTop = true
+bb.StudsOffset = Settings.StudsOffset
+bb.Size = UDim2.fromOffset(120,34)
+bb.Parent = CoreGui
+
+local frame = Instance.new("Frame",bb)
+frame.Size = UDim2.fromScale(1,1)
+frame.BackgroundColor3 = Color3.fromRGB(20,20,30)
+frame.BorderSizePixel = 0
+
+local corner = Instance.new("UICorner",frame)
+corner.CornerRadius = UDim.new(0,8)
+
+local accent = Instance.new("Frame",frame)
+accent.Size = UDim2.new(0,3,1,0)
+accent.BackgroundColor3 = color
+accent.BorderSizePixel = 0
+
+local text = Instance.new("TextLabel",frame)
+text.BackgroundTransparency = 1
+text.Size = UDim2.new(1,-10,1,0)
+text.Position = UDim2.new(0,6,0,0)
+text.Font = Enum.Font.GothamBold
+text.TextSize = Settings.TextSize
+text.TextXAlignment = Enum.TextXAlignment.Left
+text.TextStrokeTransparency = 0
+text.TextColor3 = Color3.new(1,1,1)
+
+ESP.Billboards[obj] = {
+bb = bb,
+text = text,
+accent = accent
+}
+
+end
+
+--====================================================
+-- Highlight
+--====================================================
+
+function ESP:createHighlight(obj,color)
+
+if not Settings.Highlight then return end
+
+local hl = Instance.new("Highlight")
+hl.Adornee = obj
+hl.FillTransparency = 0.7
+hl.OutlineTransparency = 0
+hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+hl.FillColor = color
+hl.OutlineColor = color
+hl.Parent = CoreGui
+
+ESP.Highlights[obj] = hl
+
+end
+
+--====================================================
+-- Tracer
+--====================================================
+
+function ESP:createTracer(obj,color)
+
+if not Settings.Tracers then return end
+
+local line = Drawing.new("Line")
+line.Thickness = 2
+line.Color = color
+line.Visible = false
+
+ESP.Tracers[obj] = line
+
+end
+
+--====================================================
+-- Box ESP
+--====================================================
+
+function ESP:createBox(obj,color)
+
+if not Settings.BoxESP then return end
+
+local box = Drawing.new("Square")
+box.Thickness = 2
+box.Filled = false
+box.Color = color
+
+ESP.Boxes[obj] = box
+
+end
+
+--====================================================
+-- Skeleton
+--====================================================
+
+function ESP:createSkeleton(obj)
+
+if not Settings.SkeletonESP then return end
+if not isPlayerModel(obj) then return end
+
+local bones = {}
+
+for i=1,12 do
+bones[i] = Drawing.new("Line")
+bones[i].Thickness = 2
+end
+
+ESP.Skeletons[obj] = bones
+
+end
+
+--====================================================
+-- Create Object ESP
+--====================================================
+
+function ESP:createObject(obj,color)
+
+ESP:createBillboard(obj,color)
+ESP:createHighlight(obj,color)
+ESP:createTracer(obj,color)
+ESP:createBox(obj,color)
+ESP:createSkeleton(obj)
+
+end
+
+--====================================================
+-- Helper: Hide Object
+--====================================================
+function ESP:hide(obj)
+    if ESP.Billboards[obj] then ESP.Billboards[obj].bb.Enabled = false end
+    if ESP.Boxes[obj] then ESP.Boxes[obj].Visible = false end
+    if ESP.Tracers[obj] then ESP.Tracers[obj].Visible = false end
+    if ESP.Skeletons[obj] then
+        for _, bone in pairs(ESP.Skeletons[obj]) do bone.Visible = false end
+    end
+end
+
+--====================================================
+-- Update Object
+--====================================================
+function ESP:updateObject(obj, color)
+    if isLocalPlayer(obj) then return end
+
+    local part = getPrimaryPart(obj)
+    if not part then return end
+
+    local dist = getDistance(part.Position)
+    
+    -- HARD CUTOFF
+    if dist > Settings.MaxDistance then
+        ESP:hide(obj)
+        return
+    end
+
+    if Settings.Rainbow then color = rainbow() end
+    local transparency = 1 - (dist / Settings.MaxDistance)
+    local scaleMult = math.clamp(1 - (dist / (Settings.MaxDistance * 1.5)), 0.5, 1)
+
+    -- Ensure objects exist
+    if not ESP.Billboards[obj] then ESP:createObject(obj, color) end
+
+    -- 1. BILLBOARD
+    local data = ESP.Billboards[obj]
+    if data then
+        local name = isPlayerModel(obj) and Players:GetPlayerFromCharacter(obj).Name or obj.Name
+        local text = name .. " [" .. math.floor(dist) .. "m]"
+        
+        local hum = obj:FindFirstChildOfClass("Humanoid")
+        if hum and isPlayerModel(obj) and Settings.HealthMode == "Number" then
+            text = text .. " | HP: " .. math.floor(hum.Health)
+        end
+
+        data.text.Text = text
+        data.text.TextTransparency = 1 - transparency
+        data.accent.BackgroundTransparency = 1 - transparency
+        data.bb.Enabled = true
+        
+        local textWidth = measureText(text) * scaleMult
+        data.bb.Size = UDim2.fromOffset(textWidth + 20, 34 * scaleMult)
+        data.text.TextSize = Settings.TextSize * scaleMult
+    end
+
+    -- 2. BOX & TRACER POSITIONING
+    local offsetPos = part.Position + Settings.StudsOffset
+    local screenPos, visible = Camera:WorldToViewportPoint(offsetPos)
+
+    -- Update Box
+    local box = ESP.Boxes[obj]
+    if box then
+        if visible then
+            local width = data.bb.AbsoluteSize.X
+            local height = data.bb.AbsoluteSize.Y
+            box.Size = Vector2.new(width, height)
+            box.Position = Vector2.new(screenPos.X - width/2, screenPos.Y - height/2)
+            box.Color = color
+            box.Transparency = transparency
+            box.Visible = true
+        else
+            box.Visible = false
+        end
+    end
+
+    -- Update Tracer (Pointing to the Billboard)
+    local tracer = ESP.Tracers[obj]
+    if tracer then
+        if visible and dist < (Settings.MaxDistance / 2) then
+            local screen = Camera.ViewportSize
+            tracer.From = Vector2.new(screen.X/2, screen.Y)
+            tracer.To = Vector2.new(screenPos.X, screenPos.Y + (data.bb.AbsoluteSize.Y / 2))
+            tracer.Color = color
+            tracer.Transparency = transparency * 0.4
+            tracer.Visible = true
+        else
+            tracer.Visible = false
+        end
+    end
+
+    -- 3. SKELETON (Players)
+    local bones = ESP.Skeletons[obj]
+    if bones and isPlayerModel(obj) then
+        local connections = {
+            {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+            {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+            {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+            {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
+            {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+        }
+        
+        local count = 1
+        for _, joint in pairs(connections) do
+            local p1, p2 = obj:FindFirstChild(joint[1]), obj:FindFirstChild(joint[2])
+            if p1 and p2 and bones[count] then
+                local v1, vis1 = Camera:WorldToViewportPoint(p1.Position)
+                local v2, vis2 = Camera:WorldToViewportPoint(p2.Position)
+                if vis1 and vis2 then
+                    bones[count].Visible = true
+                    bones[count].From = Vector2.new(v1.X, v1.Y)
+                    bones[count].To = Vector2.new(v2.X, v2.Y)
+                    bones[count].Color = color
+                    bones[count].Transparency = transparency
+                else
+                    bones[count].Visible = false
+                end
+            end
+            count = count + 1
+        end
+    end
+end
+
+--====================================================
+-- Remove (Fixed Typo & Added Drawing Cleanup)
+--====================================================
+function ESP:remove(obj)
+    if ESP.Billboards[obj] then
+        ESP.Billboards[obj].bb:Destroy()
+        ESP.Billboards[obj] = nil
+    end
+
+    if ESP.Highlights[obj] then
+        ESP.Highlights[obj]:Destroy()
+        ESP.Highlights[obj] = nil
+    end
+
+    if ESP.Tracers[obj] then
+        ESP.Tracers[obj]:Remove() -- Drawing objects use :Remove()
+        ESP.Tracers[obj] = nil
+    end
+
+    if ESP.Boxes[obj] then
+        ESP.Boxes[obj]:Remove()
+        ESP.Boxes[obj] = nil
+    end
+
+    if ESP.Skeletons[obj] then
+        for _, line in pairs(ESP.Skeletons[obj]) do
+            line:Remove()
+        end
+        ESP.Skeletons[obj] = nil
+    end
+end
+
+--====================================================
+-- Main Loop (Fixed Cleanup & Ghosting)
+--====================================================
+RunService.RenderStepped:Connect(function()
+    -- 1. Update Folders (Loot/NPCs)
+    for _, cat in ipairs(Config.Categories) do
+        if cat.Enabled and cat.Folder then
+            for _, obj in ipairs(cat.Folder:GetChildren()) do
+                ESP:updateObject(obj, cat.Color)
+            end
+        end
+    end
+
+    -- 2. Update Players
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            ESP:updateObject(player.Character, Color3.fromRGB(120, 180, 255))
+        end
+    end
+
+    -- 3. Cleanup (Fixes the "Bunching" and Tracer Bugs)
+    for obj, _ in pairs(ESP.Billboards) do
+        local isStillValid = false
+        
+        -- Check if it's a character or a folder item still in workspace
+        if obj and obj.Parent and obj:IsDescendantOf(workspace) then
+            isStillValid = true
+        end
+
+        if not isStillValid then
+            ESP:remove(obj)
+        end
+    end
+end)
