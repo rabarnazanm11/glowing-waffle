@@ -6,16 +6,17 @@ getgenv().ULTRA_ESP = {
         StudsOffset    = Vector3.new(0, 3.5, 0),
 
         TextSize       = 13,
-        DistanceScale  = true,   -- scale text/box with distance
+        DistanceScale  = true,
 
         BoxESP         = true,
         SkeletonESP    = true,
         Highlight      = true,
         Tracers        = true,
 
-        HealthMode     = "Number", -- "Bar" or "Number"
+        HealthMode     = "Number", -- "Number" / "Bar" / "Off"
 
-        Rainbow        = false
+        Rainbow        = false,
+        PlayerColor    = Color3.fromRGB(120, 180, 255),
 
     },
 
@@ -40,7 +41,7 @@ getgenv().ULTRA_ESP = {
 }
 
 --====================================================
--- ULTRA ESP FRAMEWORK  (Fixed & Improved)
+-- ULTRA ESP FRAMEWORK
 --====================================================
 
 local Players     = game:GetService("Players")
@@ -52,17 +53,17 @@ local Camera      = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
 local Config   = getgenv().ULTRA_ESP
-local Settings = Config.Settings          -- single alias, used everywhere
+local Settings = Config.Settings
 
 local ESP = {
-    Billboards = {},
-    Boxes      = {},
-    Tracers    = {},
-    Skeletons  = {},
-    Highlights = {}
+    Billboards     = {},
+    Boxes          = {},
+    Tracers        = {},
+    Skeletons      = {},
+    Highlights     = {},
+    ObjectCategory = {}  -- tracks which category each object belongs to
 }
 
--- Skeleton joint pairs (14 connections — must match bone pre-alloc below)
 local SKELETON_CONNECTIONS = {
     {"Head",       "UpperTorso"},
     {"UpperTorso", "LowerTorso"},
@@ -71,7 +72,7 @@ local SKELETON_CONNECTIONS = {
     {"LowerTorso",  "LeftUpperLeg"},  {"LeftUpperLeg",  "LeftLowerLeg"},  {"LeftLowerLeg",  "LeftFoot"},
     {"LowerTorso",  "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
 }
-local BONE_COUNT = #SKELETON_CONNECTIONS   -- 14; derived automatically so it can never mismatch
+local BONE_COUNT = #SKELETON_CONNECTIONS -- 14
 
 --====================================================
 -- Helpers
@@ -84,8 +85,8 @@ local function getRoot()
 end
 
 local function getPrimaryPart(obj)
-    if obj:IsA("BasePart")          then return obj end
-    if obj.PrimaryPart              then return obj.PrimaryPart end
+    if obj:IsA("BasePart")  then return obj end
+    if obj.PrimaryPart      then return obj.PrimaryPart end
     return obj:FindFirstChildWhichIsA("BasePart", true)
 end
 
@@ -100,26 +101,21 @@ local function isPlayerModel(model)
 end
 
 local function isLocalPlayer(model)
-    local player = Players:GetPlayerFromCharacter(model)
-    return player == LocalPlayer
+    return Players:GetPlayerFromCharacter(model) == LocalPlayer
 end
 
 local function rainbow()
     return Color3.fromHSV((tick() % 5) / 5, 1, 1)
 end
 
--- FIX: accepts the already-scaled textSize so box width matches what is rendered
 local function measureText(text, scaledSize)
     return TextService:GetTextSize(
-        text,
-        scaledSize,
-        Enum.Font.GothamBold,
-        Vector2.new(1000, 50)
+        text, scaledSize, Enum.Font.GothamBold, Vector2.new(1000, 50)
     ).X
 end
 
 --====================================================
--- Styled Billboard
+-- Create Elements
 --====================================================
 
 function ESP:createBillboard(obj, color)
@@ -127,7 +123,7 @@ function ESP:createBillboard(obj, color)
     if not part then return end
 
     local bb = Instance.new("BillboardGui")
-    bb.Adornee    = part
+    bb.Adornee     = part
     bb.AlwaysOnTop = true
     bb.StudsOffset = Settings.StudsOffset
     bb.Size        = UDim2.fromOffset(120, 34)
@@ -159,50 +155,33 @@ function ESP:createBillboard(obj, color)
     ESP.Billboards[obj] = { bb = bb, text = text, accent = accent }
 end
 
---====================================================
--- Highlight
---====================================================
-
 function ESP:createHighlight(obj, color)
     local hl = Instance.new("Highlight")
-    hl.Adornee           = obj
-    hl.FillTransparency  = 0.7
+    hl.Adornee             = obj
+    hl.FillTransparency    = 0.7
     hl.OutlineTransparency = 0
-    hl.DepthMode         = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.FillColor         = color
-    hl.OutlineColor      = color
-    hl.Parent            = CoreGui
-    ESP.Highlights[obj]  = hl
+    hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.FillColor           = color
+    hl.OutlineColor        = color
+    hl.Parent              = CoreGui
+    ESP.Highlights[obj]    = hl
 end
-
---====================================================
--- Tracer
---====================================================
 
 function ESP:createTracer(obj, color)
-    local line          = Drawing.new("Line")
-    line.Thickness      = 2
-    line.Color          = color
-    line.Visible        = false
-    ESP.Tracers[obj]    = line
+    local line       = Drawing.new("Line")
+    line.Thickness   = 2
+    line.Color       = color
+    line.Visible     = false
+    ESP.Tracers[obj] = line
 end
-
---====================================================
--- Box ESP
---====================================================
 
 function ESP:createBox(obj, color)
-    local box           = Drawing.new("Square")
-    box.Thickness       = 2
-    box.Filled          = false
-    box.Color           = color
-    ESP.Boxes[obj]      = box
+    local box      = Drawing.new("Square")
+    box.Thickness  = 2
+    box.Filled     = false
+    box.Color      = color
+    ESP.Boxes[obj] = box
 end
-
---====================================================
--- Skeleton
--- FIX: pre-allocate BONE_COUNT (14) lines, not a hard-coded 12
---====================================================
 
 function ESP:createSkeleton(obj)
     if not isPlayerModel(obj) then return end
@@ -214,171 +193,30 @@ function ESP:createSkeleton(obj)
     ESP.Skeletons[obj] = bones
 end
 
---====================================================
--- Create All ESP Elements for an Object
--- FIX: always create every element; visibility is controlled in updateObject
--- FIX: removed duplicate Highlight guard (createHighlight had its own check before — now unified here)
---====================================================
-
 function ESP:createObject(obj, color)
     ESP:createBillboard(obj, color)
-    ESP:createHighlight(obj, color)   -- always create; toggled in updateObject
-    ESP:createTracer(obj, color)      -- always create; toggled in updateObject
-    ESP:createBox(obj, color)         -- always create; toggled in updateObject
-    ESP:createSkeleton(obj)           -- always create; toggled in updateObject
+    ESP:createHighlight(obj, color)
+    ESP:createTracer(obj, color)
+    ESP:createBox(obj, color)
+    ESP:createSkeleton(obj)
 end
 
 --====================================================
--- Helper: Hide All Elements for an Object
+-- Hide  (visually suppress — keeps Drawing objects alive)
 --====================================================
 
 function ESP:hide(obj)
     if ESP.Billboards[obj] then ESP.Billboards[obj].bb.Enabled = false end
-    if ESP.Boxes[obj]      then ESP.Boxes[obj].Visible = false end
-    if ESP.Tracers[obj]    then ESP.Tracers[obj].Visible = false end
-    if ESP.Highlights[obj] then ESP.Highlights[obj].Enabled = false end
+    if ESP.Boxes[obj]      then ESP.Boxes[obj].Visible        = false end
+    if ESP.Tracers[obj]    then ESP.Tracers[obj].Visible      = false end
+    if ESP.Highlights[obj] then ESP.Highlights[obj].Enabled   = false end
     if ESP.Skeletons[obj]  then
         for _, bone in ipairs(ESP.Skeletons[obj]) do bone.Visible = false end
     end
 end
 
 --====================================================
--- Update Object (runs every RenderStepped)
---====================================================
-
-function ESP:updateObject(obj, color)
-    if isLocalPlayer(obj) then return end
-
-    local part = getPrimaryPart(obj)
-    if not part then return end
-
-    local dist = getDistance(part.Position)
-
-    -- Hard distance cutoff
-    if dist > Settings.MaxDistance then
-        ESP:hide(obj)
-        return
-    end
-
-    -- FIX: rainbow updates color variable ONCE here, applied to all elements below
-    if Settings.Rainbow then color = rainbow() end
-
-    local transparency = 1 - (dist / Settings.MaxDistance)
-
-    -- FIX: only scale when DistanceScale is enabled
-    local scaleMult = Settings.DistanceScale
-        and math.clamp(1 - (dist / (Settings.MaxDistance * 1.5)), 0.5, 1)
-        or 1
-
-    -- Lazy-create on first sight
-    if not ESP.Billboards[obj] then ESP:createObject(obj, color) end
-
-    -- ── 1. BILLBOARD ────────────────────────────────────────────────────────
-
-    local data = ESP.Billboards[obj]
-    if data then
-        local playerObj = Players:GetPlayerFromCharacter(obj)
-        local name = playerObj and playerObj.Name or obj.Name
-        local labelText = name .. " [" .. math.floor(dist) .. "m]"
-
-        local hum = obj:FindFirstChildOfClass("Humanoid")
-        if hum and isPlayerModel(obj) and Settings.HealthMode == "Number" then
-            labelText = labelText .. "  HP:" .. math.floor(hum.Health)
-        end
-
-        local scaledTextSize = Settings.TextSize * scaleMult
-        -- FIX: pass scaledTextSize into measureText so width is accurate
-        local textWidth = measureText(labelText, scaledTextSize) * scaleMult
-
-        data.text.Text              = labelText
-        data.text.TextSize          = scaledTextSize
-        data.text.TextTransparency  = 1 - transparency
-        data.accent.BackgroundColor3 = color          -- live colour update (rainbow)
-        data.accent.BackgroundTransparency = 1 - transparency
-        data.bb.Size    = UDim2.fromOffset(textWidth + 20, 34 * scaleMult)
-        data.bb.Enabled = true
-    end
-
-    -- Cache viewport size once (used by both tracer and box)
-    local viewportSize = Camera.ViewportSize
-    local offsetPos    = part.Position + Settings.StudsOffset
-    local screenPos, onScreen = Camera:WorldToViewportPoint(offsetPos)
-
-    -- ── 2. HIGHLIGHT ─────────────────────────────────────────────────────────
-    local hl = ESP.Highlights[obj]
-    if hl then
-        if Settings.Highlight then
-            hl.FillColor    = color
-            hl.OutlineColor = color
-            hl.Enabled      = true
-        else
-            hl.Enabled = false
-        end
-    end
-
-    -- ── 3. BOX ───────────────────────────────────────────────────────────────
-    local box = ESP.Boxes[obj]
-    if box then
-        -- FIX: runtime BoxESP toggle respected every frame
-        if onScreen and Settings.BoxESP and data then
-            local w = data.bb.AbsoluteSize.X
-            local h = data.bb.AbsoluteSize.Y
-            box.Size         = Vector2.new(w, h)
-            box.Position     = Vector2.new(screenPos.X - w / 2, screenPos.Y - h / 2)
-            box.Color        = color
-            box.Transparency = 1 - transparency
-            box.Visible      = true
-        else
-            box.Visible = false
-        end
-    end
-
-    -- ── 4. TRACER ────────────────────────────────────────────────────────────
-    local tracer = ESP.Tracers[obj]
-    if tracer then
-        -- FIX: runtime Tracers toggle respected every frame
-        if onScreen and Settings.Tracers and dist < (Settings.MaxDistance / 2) and data then
-            tracer.From         = Vector2.new(viewportSize.X / 2, viewportSize.Y)
-            tracer.To           = Vector2.new(screenPos.X, screenPos.Y + data.bb.AbsoluteSize.Y / 2)
-            tracer.Color        = color
-            tracer.Transparency = (1 - transparency) * 0.4
-            tracer.Visible      = true
-        else
-            tracer.Visible = false
-        end
-    end
-
-    -- ── 5. SKELETON ──────────────────────────────────────────────────────────
-    local bones = ESP.Skeletons[obj]
-    if bones then
-        -- FIX: runtime SkeletonESP toggle respected every frame
-        if isPlayerModel(obj) and Settings.SkeletonESP then
-            for i, joint in ipairs(SKELETON_CONNECTIONS) do
-                local p1 = obj:FindFirstChild(joint[1])
-                local p2 = obj:FindFirstChild(joint[2])
-                local bone = bones[i]
-                if p1 and p2 and bone then
-                    local v1, vis1 = Camera:WorldToViewportPoint(p1.Position)
-                    local v2, vis2 = Camera:WorldToViewportPoint(p2.Position)
-                    if vis1 and vis2 then
-                        bone.From         = Vector2.new(v1.X, v1.Y)
-                        bone.To           = Vector2.new(v2.X, v2.Y)
-                        bone.Color        = color
-                        bone.Transparency = 1 - transparency
-                        bone.Visible      = true
-                    else
-                        bone.Visible = false
-                    end
-                end
-            end
-        else
-            for _, bone in ipairs(bones) do bone.Visible = false end
-        end
-    end
-end
-
---====================================================
--- Remove & Clean Up All Drawing/GUI Objects
+-- Remove & Destroy
 --====================================================
 
 function ESP:remove(obj)
@@ -402,6 +240,131 @@ function ESP:remove(obj)
         for _, line in ipairs(ESP.Skeletons[obj]) do line:Remove() end
         ESP.Skeletons[obj] = nil
     end
+    ESP.ObjectCategory[obj] = nil
+end
+
+--====================================================
+-- Update Object
+--====================================================
+
+function ESP:updateObject(obj, color)
+    if isLocalPlayer(obj) then return end
+
+    local part = getPrimaryPart(obj)
+    if not part then return end
+
+    local dist = getDistance(part.Position)
+
+    if dist > Settings.MaxDistance then
+        ESP:hide(obj)
+        return
+    end
+
+    if Settings.Rainbow then color = rainbow() end
+
+    local transparency = 1 - (dist / Settings.MaxDistance)
+    local scaleMult    = Settings.DistanceScale
+        and math.clamp(1 - (dist / (Settings.MaxDistance * 1.5)), 0.5, 1)
+        or  1
+
+    if not ESP.Billboards[obj] then ESP:createObject(obj, color) end
+
+    -- 1. Billboard
+    local data = ESP.Billboards[obj]
+    if data then
+        local playerObj = Players:GetPlayerFromCharacter(obj)
+        local name      = playerObj and playerObj.Name or obj.Name
+        local labelText = name .. " [" .. math.floor(dist) .. "m]"
+
+        local hum = obj:FindFirstChildOfClass("Humanoid")
+        if hum and isPlayerModel(obj) and Settings.HealthMode == "Number" then
+            labelText = labelText .. "  HP:" .. math.floor(hum.Health)
+        end
+
+        local scaledTextSize = Settings.TextSize * scaleMult
+        local textWidth      = measureText(labelText, scaledTextSize) * scaleMult
+
+        data.text.Text                     = labelText
+        data.text.TextSize                 = scaledTextSize
+        data.text.TextTransparency         = 1 - transparency
+        data.accent.BackgroundColor3       = color
+        data.accent.BackgroundTransparency = 1 - transparency
+        data.bb.Size                       = UDim2.fromOffset(textWidth + 20, 34 * scaleMult)
+        data.bb.Enabled                    = true
+    end
+
+    local viewportSize        = Camera.ViewportSize
+    local offsetPos           = part.Position + Settings.StudsOffset
+    local screenPos, onScreen = Camera:WorldToViewportPoint(offsetPos)
+
+    -- 2. Highlight
+    local hl = ESP.Highlights[obj]
+    if hl then
+        if Settings.Highlight then
+            hl.FillColor    = color
+            hl.OutlineColor = color
+            hl.Enabled      = true
+        else
+            hl.Enabled = false
+        end
+    end
+
+    -- 3. Box
+    local box = ESP.Boxes[obj]
+    if box then
+        if onScreen and Settings.BoxESP and data then
+            local w = data.bb.AbsoluteSize.X
+            local h = data.bb.AbsoluteSize.Y
+            box.Size         = Vector2.new(w, h)
+            box.Position     = Vector2.new(screenPos.X - w / 2, screenPos.Y - h / 2)
+            box.Color        = color
+            box.Transparency = 1 - transparency
+            box.Visible      = true
+        else
+            box.Visible = false
+        end
+    end
+
+    -- 4. Tracer
+    local tracer = ESP.Tracers[obj]
+    if tracer then
+        if onScreen and Settings.Tracers and dist < (Settings.MaxDistance / 2) and data then
+            tracer.From         = Vector2.new(viewportSize.X / 2, viewportSize.Y)
+            tracer.To           = Vector2.new(screenPos.X, screenPos.Y + data.bb.AbsoluteSize.Y / 2)
+            tracer.Color        = color
+            tracer.Transparency = (1 - transparency) * 0.4
+            tracer.Visible      = true
+        else
+            tracer.Visible = false
+        end
+    end
+
+    -- 5. Skeleton
+    local bones = ESP.Skeletons[obj]
+    if bones then
+        if isPlayerModel(obj) and Settings.SkeletonESP then
+            for i, joint in ipairs(SKELETON_CONNECTIONS) do
+                local p1   = obj:FindFirstChild(joint[1])
+                local p2   = obj:FindFirstChild(joint[2])
+                local bone = bones[i]
+                if p1 and p2 and bone then
+                    local v1, vis1 = Camera:WorldToViewportPoint(p1.Position)
+                    local v2, vis2 = Camera:WorldToViewportPoint(p2.Position)
+                    if vis1 and vis2 then
+                        bone.From         = Vector2.new(v1.X, v1.Y)
+                        bone.To           = Vector2.new(v2.X, v2.Y)
+                        bone.Color        = color
+                        bone.Transparency = 1 - transparency
+                        bone.Visible      = true
+                    else
+                        bone.Visible = false
+                    end
+                end
+            end
+        else
+            for _, bone in ipairs(bones) do bone.Visible = false end
+        end
+    end
 end
 
 --====================================================
@@ -412,10 +375,17 @@ RunService.RenderStepped:Connect(function()
 
     -- 1. Category objects (Loot, NPCs, etc.)
     for _, cat in ipairs(Config.Categories) do
-        -- FIX: also check cat.Folder.Parent so a destroyed folder doesn't error
-        if cat.Enabled and cat.Folder and cat.Folder.Parent then
+        if cat.Folder and cat.Folder.Parent then
             for _, obj in ipairs(cat.Folder:GetChildren()) do
-                ESP:updateObject(obj, cat.Color)
+                if cat.Enabled then
+                    ESP.ObjectCategory[obj] = cat.Name
+                    ESP:updateObject(obj, cat.Color)
+                else
+                    -- THE FIX: when a category is toggled OFF,
+                    -- actively hide every object in it every frame.
+                    -- Without this the last-drawn frame stays frozen on screen.
+                    ESP:hide(obj)
+                end
             end
         end
     end
@@ -426,7 +396,10 @@ RunService.RenderStepped:Connect(function()
             and player.Character
             and player.Character:FindFirstChild("HumanoidRootPart")
         then
-            ESP:updateObject(player.Character, Color3.fromRGB(120, 180, 255))
+            ESP:updateObject(
+                player.Character,
+                Settings.PlayerColor or Color3.fromRGB(120, 180, 255)
+            )
         end
     end
 
