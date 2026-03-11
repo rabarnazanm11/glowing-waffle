@@ -246,9 +246,10 @@ function ESP:updateObject(obj, color)
     if Settings.Rainbow then color = rainbow() end
 
     -- Scale multiplier (only when DistanceScale is on)
-    local scaleMult = (Settings.DistanceScale)
-        and math.clamp(1 - dist / (Settings.MaxDistance * 1.5), 0.5, 1)
-        or  1
+    local scaleMult = 1
+    if Settings.DistanceScale then
+        scaleMult = math.clamp(1 - dist / (Settings.MaxDistance * 1.5), 0.5, 1)
+    end
 
     -- Lazy-create
     if not ESP.Billboards[obj] then
@@ -342,12 +343,13 @@ RunService.RenderStepped:Connect(function()
 
     -- 2. Players
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer
-            and player.Character
-            and player.Character:FindFirstChild("HumanoidRootPart")
-        then
-            local color = Settings.Rainbow and rainbow()
-                or (Settings.PlayerColor or Color3.fromRGB(120, 180, 255))
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local color
+            if Settings.Rainbow then
+                color = rainbow()
+            else
+                color = Settings.PlayerColor or Color3.fromRGB(120, 180, 255)
+            end
             ESP:updateObject(player.Character, color)
         end
     end
