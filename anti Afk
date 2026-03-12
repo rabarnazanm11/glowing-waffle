@@ -1,0 +1,134 @@
+--==================================================
+-- Advanced Anti-AFK System
+-- Includes: activity detection + UI timer
+--==================================================
+
+local AntiAFK = {}
+
+--// Services
+local Players = game:GetService("Players")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+--// Player
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Camera = workspace.CurrentCamera
+
+--// Settings
+AntiAFK.Interval = 60
+AntiAFK.Enabled = false
+
+--// State
+local LastActivity = tick()
+local ScreenGui
+local TimerLabel
+
+--==================================================
+-- Create Timer UI
+--==================================================
+
+local function CreateUI()
+
+    ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "AntiAFK_Timer"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.Parent = PlayerGui
+
+    TimerLabel = Instance.new("TextLabel")
+    TimerLabel.Size = UDim2.new(0,180,0,40)
+    TimerLabel.Position = UDim2.new(0.5,-90,0,80)
+    TimerLabel.BackgroundTransparency = 0.3
+    TimerLabel.BackgroundColor3 = Color3.fromRGB(20,20,20)
+    TimerLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    TimerLabel.TextScaled = true
+    TimerLabel.Font = Enum.Font.GothamBold
+    TimerLabel.Parent = ScreenGui
+
+end
+
+--==================================================
+-- Remove UI
+--==================================================
+
+local function RemoveUI()
+    if ScreenGui then
+        ScreenGui:Destroy()
+        ScreenGui = nil
+        TimerLabel = nil
+    end
+end
+
+--==================================================
+-- Activity Detection
+--==================================================
+
+local function RegisterActivity()
+    LastActivity = tick()
+end
+
+UserInputService.InputBegan:Connect(RegisterActivity)
+UserInputService.InputChanged:Connect(RegisterActivity)
+
+--==================================================
+-- Start Anti AFK
+--==================================================
+
+function AntiAFK:Start()
+
+    if self.Enabled then return end
+    self.Enabled = true
+
+    CreateUI()
+
+    task.spawn(function()
+
+        while self.Enabled do
+
+            task.wait(0.1)
+
+            local idleTime = tick() - LastActivity
+            local remaining = math.max(0, math.floor(self.Interval - idleTime))
+
+            -- Update UI
+            if TimerLabel then
+                TimerLabel.Text = "Anti-AFK: "..remaining.."s"
+            end
+
+            -- If player is idle
+            if idleTime >= self.Interval then
+
+                VirtualUser:Button2Down(Vector2.new(), Camera.CFrame)
+                task.wait(0.2)
+                VirtualUser:Button2Up(Vector2.new(), Camera.CFrame)
+
+                -- small camera movement
+                Camera.CFrame = Camera.CFrame * CFrame.Angles(0, math.rad(1), 0)
+
+                LastActivity = tick()
+
+                print("[Anti-AFK] Idle prevented.")
+
+            end
+
+        end
+
+    end)
+
+end
+
+--==================================================
+-- Stop Anti AFK
+--==================================================
+
+function AntiAFK:Stop()
+
+    self.Enabled = false
+    RemoveUI()
+
+    print("[Anti-AFK] Disabled.")
+
+end
+
+return AntiAFK
