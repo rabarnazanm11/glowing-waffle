@@ -1,0 +1,152 @@
+--==================================================
+-- Advanced Anti-AFK System
+-- Includes: activity detection + compact top-right UI
+--==================================================
+
+local AntiAFK = {}
+
+--// Services
+local Players = game:GetService("Players")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+
+--// Player
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Camera = workspace.CurrentCamera
+
+--// Settings
+AntiAFK.Interval = 60
+AntiAFK.Enabled = false
+
+--// State
+local LastActivity = tick()
+local ScreenGui, TimerLabel
+
+--==================================================
+-- Create Compact Top-Right UI
+--==================================================
+
+local function CreateUI()
+	ScreenGui = Instance.new("ScreenGui")
+	ScreenGui.Name = "AntiAFK_Timer"
+	ScreenGui.ResetOnSpawn = false
+	ScreenGui.DisplayOrder = 999
+	ScreenGui.Parent = PlayerGui
+
+	-- Pill container
+	local Frame = Instance.new("Frame")
+	Frame.Name = "Pill"
+	Frame.Size = UDim2.new(0, 130, 0, 28)
+	Frame.Position = UDim2.new(1, -140, 0, 12) -- top-right, 12px from edge
+	Frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+	Frame.BackgroundTransparency = 0.2
+	Frame.BorderSizePixel = 0
+	Frame.Parent = ScreenGui
+
+	local Corner = Instance.new("UICorner")
+	Corner.CornerRadius = UDim.new(1, 0) -- full pill shape
+	Corner.Parent = Frame
+
+	local Stroke = Instance.new("UIStroke")
+	Stroke.Color = Color3.fromRGB(80, 80, 80)
+	Stroke.Thickness = 1
+	Stroke.Transparency = 0.5
+	Stroke.Parent = Frame
+
+	-- Status dot
+	local Dot = Instance.new("Frame")
+	Dot.Name = "Dot"
+	Dot.Size = UDim2.new(0, 7, 0, 7)
+	Dot.Position = UDim2.new(0, 10, 0.5, -3)
+	Dot.BackgroundColor3 = Color3.fromRGB(100, 220, 100)
+	Dot.BorderSizePixel = 0
+	Dot.Parent = Frame
+
+	local DotCorner = Instance.new("UICorner")
+	DotCorner.CornerRadius = UDim.new(1, 0)
+	DotCorner.Parent = Dot
+
+	-- Timer label
+	TimerLabel = Instance.new("TextLabel")
+	TimerLabel.Size = UDim2.new(1, -24, 1, 0)
+	TimerLabel.Position = UDim2.new(0, 22, 0, 0)
+	TimerLabel.BackgroundTransparency = 1
+	TimerLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+	TimerLabel.TextSize = 11
+	TimerLabel.Font = Enum.Font.GothamBold
+	TimerLabel.TextXAlignment = Enum.TextXAlignment.Left
+	TimerLabel.Text = "Anti-AFK: --s"
+	TimerLabel.Parent = Frame
+end
+
+--==================================================
+-- Remove UI
+--==================================================
+
+local function RemoveUI()
+	if ScreenGui then
+		ScreenGui:Destroy()
+		ScreenGui = nil
+		TimerLabel = nil
+	end
+end
+
+--==================================================
+-- Activity Detection
+--==================================================
+
+local function RegisterActivity()
+	LastActivity = tick()
+end
+
+UserInputService.InputBegan:Connect(RegisterActivity)
+UserInputService.InputChanged:Connect(RegisterActivity)
+
+--==================================================
+-- Start Anti-AFK
+--==================================================
+
+function AntiAFK:Start()
+	if self.Enabled then return end
+	self.Enabled = true
+	CreateUI()
+
+	task.spawn(function()
+		while self.Enabled do
+			task.wait(0.1)
+
+			local idleTime = tick() - LastActivity
+			local remaining = math.max(0, math.floor(self.Interval - idleTime))
+
+			if TimerLabel then
+				TimerLabel.Text = "Anti-AFK: " .. remaining .. "s"
+			end
+
+			if idleTime >= self.Interval then
+				VirtualUser:Button2Down(Vector2.new(), Camera.CFrame)
+				task.wait(0.2)
+				VirtualUser:Button2Up(Vector2.new(), Camera.CFrame)
+
+				LastActivity = tick()
+				redzlib:Notify({
+    Title = "UnIdled",
+    Text = "Anti-AFK prevented Idle",
+    Duration = 3   -- seconds
+})
+			end
+		end
+	end)
+end
+
+--==================================================
+-- Stop Anti-AFK
+--==================================================
+
+function AntiAFK:Stop()
+	self.Enabled = false
+	RemoveUI()
+	print("[Anti-AFK] Disabled.")
+end
+
+return AntiAFK
