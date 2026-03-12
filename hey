@@ -2,6 +2,7 @@
 -- Advanced Anti-AFK System
 -- Includes: activity detection + compact top-right UI
 --==================================================
+local redzlib = loadstring(game:HttpGet("https://raw.githubusercontent.com/rabarnazanm11/glowing-waffle/refs/heads/main/NewReDd"))()
 
 local AntiAFK = {}
 
