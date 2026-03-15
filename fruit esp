@@ -1,0 +1,359 @@
+getgenv().ULTRA_ESP = {
+
+    Settings = {
+
+        MaxDistance   = 10000000,          -- 100 – 100000 studs
+
+        StudsOffset   = Vector3.new(0, 3.5, 0),
+
+        TextSize      = 13,
+        DistanceScale = false,
+
+        Highlight     = false,
+        Tracers       = false,
+
+        -- Health is always inline: "Name [Xm]  HP:100"
+        -- Toggle ShowHealth to show/hide it
+        ShowHealth    = false,
+
+        Rainbow       = false,
+        PlayerColor   = Color3.fromRGB(120, 180, 255),
+
+    },
+
+    Categories = {
+        {
+            Name    = "FruitSpawns",
+            Folder  = workspace._WorldOrigin.FruitSpawns,
+            Color   = Color3.fromRGB(80, 255, 120),
+            Enabled = false,
+        },
+
+    },
+
+}
+
+--====================================================
+-- ULTRA ESP FRAMEWORK  (v5 - clean)
+--====================================================
+
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local CoreGui     = game:GetService("CoreGui")
+local TextService = game:GetService("TextService")
+local Camera      = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local Config   = getgenv().ULTRA_ESP
+local Settings = Config.Settings
+
+local ESP = {
+    Billboards     = {},
+    Tracers        = {},
+    Highlights     = {},
+    ObjectCategory = {},
+}
+
+-- Layout constants
+local BB_ROW_H   = 20   -- px height of one text row
+local BB_PAD     = 6    -- top/bottom inner padding
+local BB_INDENT  = 8    -- left indent for text (past accent bar)
+local ACCENT_W   = 3    -- accent bar width
+
+--====================================================
+-- Helpers
+--====================================================
+
+local function getRoot()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getPrimaryPart(obj)
+    if obj:IsA("BasePart") then return obj end
+    if obj.PrimaryPart     then return obj.PrimaryPart end
+    return obj:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function getDistance(pos)
+    local root = getRoot()
+    if not root then return 0 end
+    return (root.Position - pos).Magnitude
+end
+
+local function isPlayerModel(model)
+    return Players:GetPlayerFromCharacter(model) ~= nil
+end
+
+local function isLocalPlayer(model)
+    return Players:GetPlayerFromCharacter(model) == LocalPlayer
+end
+
+local function rainbow()
+    return Color3.fromHSV((tick() % 5) / 5, 1, 1)
+end
+
+-- Cached measure: returns pixel width of text at a given size
+local _measureCache = {}
+local function measureWidth(text, size)
+    local key = text .. "|" .. size
+    if _measureCache[key] then return _measureCache[key] end
+    local w = TextService:GetTextSize(
+        text, size, Enum.Font.GothamBold, Vector2.new(4000, 100)
+    ).X
+    -- Keep cache small — evict when it grows large
+    if next(_measureCache) and #_measureCache > 300 then
+        _measureCache = {}
+    end
+    _measureCache[key] = w
+    return w
+end
+
+--====================================================
+-- Billboard
+--====================================================
+
+function ESP:createBillboard(obj, color)
+    local part = getPrimaryPart(obj)
+    if not part then return end
+
+    local bb = Instance.new("BillboardGui")
+    bb.Adornee      = part
+    bb.AlwaysOnTop  = true
+    bb.StudsOffset  = Settings.StudsOffset
+    bb.Size         = UDim2.fromOffset(160, BB_ROW_H + BB_PAD * 2)
+    bb.Parent       = CoreGui
+
+    local frame = Instance.new("Frame", bb)
+    frame.Size             = UDim2.fromScale(1, 1)
+    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    frame.BorderSizePixel  = 0
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+    local accent = Instance.new("Frame", frame)
+    accent.Name             = "Accent"
+    accent.Size             = UDim2.new(0, ACCENT_W, 1, 0)
+    accent.BackgroundColor3 = color
+    accent.BorderSizePixel  = 0
+
+    -- Single label — always white, no transparency changes
+    local label = Instance.new("TextLabel", frame)
+    label.Name                   = "Label"
+    label.BackgroundTransparency = 1
+    label.Size                   = UDim2.new(1, -(BB_INDENT + 2), 1, 0)
+    label.Position               = UDim2.new(0, BB_INDENT, 0, 0)
+    label.Font                   = Enum.Font.GothamBold
+    label.TextSize               = Settings.TextSize
+    label.TextXAlignment         = Enum.TextXAlignment.Left
+    label.TextYAlignment         = Enum.TextYAlignment.Center
+    label.TextStrokeTransparency = 0.5
+    label.TextColor3             = Color3.new(1, 1, 1)   -- always white
+    label.TextTransparency       = 0                      -- never fades
+    label.TextWrapped            = false
+    label.ClipsDescendants       = false
+
+    ESP.Billboards[obj] = {
+        bb     = bb,
+        frame  = frame,
+        accent = accent,
+        label  = label,
+    }
+end
+
+--====================================================
+-- Highlight
+--====================================================
+
+function ESP:createHighlight(obj, color)
+    local hl = Instance.new("Highlight")
+    hl.Adornee             = obj
+    hl.FillTransparency    = 0.7
+    hl.OutlineTransparency = 0
+    hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.FillColor           = color
+    hl.OutlineColor        = color
+    hl.Parent              = CoreGui
+    ESP.Highlights[obj]    = hl
+end
+
+--====================================================
+-- Tracer
+--====================================================
+
+function ESP:createTracer(obj, color)
+    local line       = Drawing.new("Line")
+    line.Thickness   = 1.5
+    line.Color       = color
+    line.Visible     = false
+    ESP.Tracers[obj] = line
+end
+
+--====================================================
+-- Create / Hide / Remove
+--====================================================
+
+function ESP:createObject(obj, color)
+    ESP:createBillboard(obj, color)
+    ESP:createHighlight(obj, color)
+    ESP:createTracer(obj, color)
+end
+
+function ESP:hide(obj)
+    if ESP.Billboards[obj] then ESP.Billboards[obj].bb.Enabled = false end
+    if ESP.Tracers[obj]    then ESP.Tracers[obj].Visible       = false end
+    if ESP.Highlights[obj] then ESP.Highlights[obj].Enabled    = false end
+end
+
+function ESP:remove(obj)
+    if ESP.Billboards[obj] then
+        ESP.Billboards[obj].bb:Destroy()
+        ESP.Billboards[obj] = nil
+    end
+    if ESP.Highlights[obj] then
+        ESP.Highlights[obj]:Destroy()
+        ESP.Highlights[obj] = nil
+    end
+    if ESP.Tracers[obj] then
+        ESP.Tracers[obj]:Remove()
+        ESP.Tracers[obj] = nil
+    end
+    ESP.ObjectCategory[obj] = nil
+end
+
+--====================================================
+-- Update Object
+--====================================================
+
+function ESP:updateObject(obj, color)
+    if isLocalPlayer(obj) then return end
+
+    local part = getPrimaryPart(obj)
+    if not part then return end
+
+    local dist = getDistance(part.Position)
+
+    if dist > Settings.MaxDistance then
+        ESP:hide(obj)
+        return
+    end
+
+    if Settings.Rainbow then color = rainbow() end
+
+    -- Scale multiplier (only when DistanceScale is on)
+    local scaleMult = 1
+    if Settings.DistanceScale then
+        scaleMult = math.clamp(1 - dist / (Settings.MaxDistance * 1.5), 0.5, 1)
+    end
+
+    -- Lazy-create
+    if not ESP.Billboards[obj] then
+        ESP:createObject(obj, color)
+    end
+
+    local data = ESP.Billboards[obj]
+    if not data then return end     -- guard: createBillboard failed (no part)
+
+    -- ── Label text ─────────────────────────────────────────────────────────
+
+    local playerObj = Players:GetPlayerFromCharacter(obj)
+    local name      = playerObj and playerObj.Name or obj.Name
+    local labelText = name .. " [" .. math.floor(dist) .. "m]"
+
+    if Settings.ShowHealth then
+        local hum = obj:FindFirstChildOfClass("Humanoid")
+        if hum then
+            labelText = labelText .. "  HP:" .. math.floor(hum.Health)
+        end
+    end
+
+    local scaledSize = Settings.TextSize * scaleMult
+    local bbWidth    = math.max(measureWidth(labelText, scaledSize) + BB_INDENT + 6, 80)
+    local bbHeight   = math.max(BB_ROW_H * scaleMult + BB_PAD * 2, 20)
+
+    -- Apply
+    data.bb.Size            = UDim2.fromOffset(bbWidth, bbHeight)
+    data.bb.Enabled         = true
+    data.label.Text         = labelText
+    data.label.TextSize     = scaledSize
+    -- Text is ALWAYS white — no transparency, no color change
+    data.label.TextColor3   = Color3.new(1, 1, 1)
+    data.accent.BackgroundColor3 = color    -- accent bar matches ESP color
+
+    -- ── Highlight ──────────────────────────────────────────────────────────
+
+    local hl = ESP.Highlights[obj]
+    if hl then
+        if Settings.Highlight then
+            hl.FillColor    = color
+            hl.OutlineColor = color
+            hl.Enabled      = true
+        else
+            hl.Enabled = false
+        end
+    end
+
+    -- ── Tracer ─────────────────────────────────────────────────────────────
+
+    local tracer = ESP.Tracers[obj]
+    if tracer then
+        if Settings.Tracers then
+            local offsetPos           = part.Position + Settings.StudsOffset
+            local screenPos, onScreen = Camera:WorldToViewportPoint(offsetPos)
+            if onScreen then
+                local viewSize  = Camera.ViewportSize
+                tracer.From         = Vector2.new(viewSize.X / 2, viewSize.Y)
+                tracer.To           = Vector2.new(screenPos.X, screenPos.Y)
+                tracer.Color        = color
+                tracer.Transparency = 0
+                tracer.Visible      = true
+            else
+                tracer.Visible = false
+            end
+        else
+            tracer.Visible = false
+        end
+    end
+end
+
+--====================================================
+-- Main Loop
+--====================================================
+
+RunService.RenderStepped:Connect(function()
+
+    -- 1. Category objects (Loot, NPCs, etc.)
+    for _, cat in ipairs(Config.Categories) do
+        if cat.Folder and cat.Folder.Parent then
+            for _, obj in ipairs(cat.Folder:GetChildren()) do
+                if cat.Enabled then
+                    ESP.ObjectCategory[obj] = cat.Name
+                    ESP:updateObject(obj, cat.Color)
+                else
+                    ESP:hide(obj)
+                end
+            end
+        end
+    end
+
+    -- 2. Players
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local color
+            if Settings.Rainbow then
+                color = rainbow()
+            else
+                color = Settings.PlayerColor or Color3.fromRGB(120, 180, 255)
+            end
+            ESP:updateObject(player.Character, color)
+        end
+    end
+
+    -- 3. Stale cleanup
+    for obj in pairs(ESP.Billboards) do
+        if not (obj and obj.Parent and obj:IsDescendantOf(workspace)) then
+            ESP:remove(obj)
+        end
+    end
+
+end)
