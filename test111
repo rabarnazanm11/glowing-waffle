@@ -1032,7 +1032,7 @@ FarmTab:AddSlider({Name="Fruit Mastery – Switch to Fruit at HP%", Min=1, Max=1
 FarmTab:AddToggle({Name="Auto Farm Fruit Mastery", Description="Normal weapon until HP threshold then switches to Fruit", Default=false, Callback=function(v) F.AutoFarmFruit=v if not v then CommF_:InvokeServer("AbandonQuest") end end})
 
 if IS3 then
-    FarmTab:AddSeparator({Name="Elite Hunter (World 3)"})
+    FarmTab:AddSection("Elite Hunter (World 3)")
     FarmTab:AddToggle({Name="Auto Elite Hunter", Description="Farms Diablo / Deandre / Urban", Default=false, Callback=function(v)
         F.AutoEliteHunter = v
         if not v then CommF_:InvokeServer("AbandonQuest") end
@@ -1062,7 +1062,7 @@ SetTab:AddToggle({Name="Hide Notifications",     Default=false, Callback=functio
 end})
 SetTab:AddToggle({Name="White Screen (max FPS)", Default=false, Callback=function(v) RunService:Set3dRenderingEnabled(not v) end})
 
-SetTab:AddSeparator({Name="Performance"})
+SetTab:AddSection("Performance")
 SetTab:AddButton({Name="FPS Boost", Callback=function()
     pcall(function()
         settings().Rendering.QualityLevel = "Level01" setfpscap(144)
@@ -1095,7 +1095,7 @@ SetTab:AddButton({Name="Toggle Status Overlay", Callback=function()
     StatusFrame.Visible = not StatusFrame.Visible
 end})
 
-SetTab:AddSeparator({Name="Travel"})
+SetTab:AddSection("Travel")
 SetTab:AddButton({Name="Travel to Second Sea", Callback=function() CommF_:InvokeServer("TravelDressrosa") end})
 SetTab:AddButton({Name="Travel to Third Sea",  Callback=function() CommF_:InvokeServer("TravelZou") end})
 SetTab:AddButton({Name="Rejoin Server", Callback=function()
@@ -1107,7 +1107,7 @@ end})
 -- ============================================================
 local StatsTab = Window:MakeTab({"Stats"})
 StatsTab:AddSlider({Name="Points Per Allocation", Min=1, Max=500, Default=1, Callback=function(v) F.StatPoints=v end})
-StatsTab:AddSeparator({Name="Auto Allocate Stat Points"})
+StatsTab:AddSection("Auto Allocate Stat Points")
 StatsTab:AddToggle({Name="Auto Melee Stat",   Default=false, Callback=function(v) F.StatMelee=v end})
 StatsTab:AddToggle({Name="Auto Defense Stat", Default=false, Callback=function(v) F.StatDefense=v end})
 StatsTab:AddToggle({Name="Auto Sword Stat",   Default=false, Callback=function(v) F.StatSword=v end})
