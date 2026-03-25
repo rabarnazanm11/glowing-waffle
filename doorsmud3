@@ -1,0 +1,39 @@
+local PlayerMods = {}
+local Core = require(script.Parent.Core)
+
+PlayerMods.State = {
+    CharJumpOn=true, CharSlideOn=true, CharCrouchOn=true, CharSpeedValue=4,
+    ClientGlowOn=true, InstantInteractConn=nil, AutoProxiOn=true, LootAuraOn=false,
+    ProxiReachValue=5
+}
+
+function PlayerMods.attributeLoop()
+    task.spawn(function()
+        while true do task.wait(0.1)
+            local char = Core.State.Character
+            if char then
+                pcall(function()
+                    if PlayerMods.State.CharJumpOn then char:SetAttribute("CanJump", true) end
+                    -- All other attributes
+                end)
+            end
+        end
+    end)
+end
+
+function PlayerMods.lootAuraLoop()
+    task.spawn(function()
+        while true do task.wait(0.5)
+            if PlayerMods.State.LootAuraOn then PlayerMods.tryLootNearby() end
+        end
+    end)
+end
+
+function PlayerMods.tryLootNearby() /* original logic using Core.LOOT_NAMES */ end
+
+function PlayerMods.init()
+    PlayerMods.attributeLoop()
+    PlayerMods.lootAuraLoop()
+end
+
+return PlayerMods
