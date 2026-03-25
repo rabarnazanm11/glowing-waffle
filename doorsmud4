@@ -1,0 +1,24 @@
+local UI = {}
+local Core = require(script.Parent.Core)
+local ESP = require(script.Parent.ESP)
+local PlayerMods = require(script.Parent.PlayerMods)
+
+function UI.createToggles(tab, stateVar, callback)
+    tab:AddToggle({
+        Name="Item ESP", Default=true,
+        Callback=function(v) stateVar.ItemESPToggle=v; if not v then ESP.clearItemCache() end end
+    })
+    -- All toggles/sliders calling callbacks that update state vars
+end
+
+function UI.init(core, esp, mods)
+    local Window = core.RedzLib:MakeWindow({"Doors Hub Modular", "Perplexity v2"})
+    local MainTab = Window:MakeTab({"Main"})
+    
+    UI.createToggles(MainTab, esp.State, function(key, value) esp.State[key]=value end)
+    UI.createToggles(PlayerTab, mods.State, function(key, value) mods.State[key]=value end)
+    
+    -- Settings tab with destroy button: ESP.destroy(); PlayerMods.cleanup()
+end
+
+return UI
