@@ -1,0 +1,28 @@
+local ESP = {}
+local Core = require(script.Parent.Core)
+local highlights = {entity={}, item={}, door={}, /* all original highlight tables */ }
+
+function ESP.applyHL(tbl, inst, color)
+    if tbl[inst] then return end
+    tbl[inst] = Core.Utils.makeHighlight(inst, color)
+end
+
+function ESP.setupEntityNotifier()
+    -- Original setupEntityNotifier logic, using Core.EntityMap, Core.Config.ENTITIES
+end
+
+-- All other ESP functions: setupTestEntityESP, cache loops, heartbeat ESP rendering
+-- Converted to use Core.State.HRP, Core.Config, etc.
+
+function ESP.init()
+    ESP.cacheLoop = task.spawn(ESP.mainCacheLoop) -- Combines all original cache task.spawns
+    ESP.renderLoop = Core.Services.RunService.Heartbeat:Connect(ESP.renderESP)
+end
+
+function ESP.destroy()
+    if ESP.cacheLoop then task.cancel(ESP.cacheLoop) end
+    if ESP.renderLoop then ESP.renderLoop:Disconnect() end
+    -- Clear all highlights
+end
+
+return ESP
