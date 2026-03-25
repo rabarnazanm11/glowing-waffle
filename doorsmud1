@@ -1,0 +1,59 @@
+local Core = {}
+
+Core.Services = {
+    Players = game:GetService("Players"),
+    RunService = game:GetService("RunService"),
+    ReplicatedStorage = game:GetService("ReplicatedStorage"),
+    UserInputService = game:GetService("UserInputService"),
+    ProximityPromptService = game:GetService("ProximityPromptService"),
+    Workspace = game:GetService("Workspace"),
+    CurrentRooms = game.Workspace:WaitForChild("CurrentRooms"),
+    Camera = game.Workspace.CurrentCamera
+}
+
+Core.Player = Core.Services.Players.LocalPlayer
+Core.State = {
+    Character = Core.Player.Character or Core.Player.CharacterAdded:Wait(),
+    HRP = nil,
+    Connections = {}
+}
+
+Core.Player.CharacterAdded:Connect(function(char)
+    Core.State.Character = char
+    Core.State.HRP = char:WaitForChild("HumanoidRootPart")
+end)
+
+-- Easy-edit configs
+Core.Config = {
+    ENTITIES = { -- Same as original ENTITIES table [web:12]
+        {Name="RushMoving", Display="Rush", Color=Color3.fromRGB(255,80,0), notify=true, highlight=true, tracer=true},
+        -- ... (all 21 entities from original)
+    },
+    SEARCH_ITEMS = {"KeyObtain", "Vitamins", "GoldPile", "Lockpick", /* etc. */},
+    AUTOPROXI_BLACKLIST = {Wardrobe=true, /* etc. */},
+    CUSTOM_ESP = { /* original CUSTOM_ESP */ },
+    CFG = {ItemColor=Color3.fromRGB(80,255,120), /* etc. */},
+    LOOT_NAMES = {Drawer=true, /* etc. */},
+    LOOT_RANGE = 15
+}
+
+Core.EntityMap = {}
+for _, e in ipairs(Core.Config.ENTITIES) do Core.EntityMap[e.Name] = e end
+Core.ItemSet = {}
+for _, name in ipairs(Core.Config.SEARCH_ITEMS) do Core.ItemSet[name] = true end
+
+Core.Utils = {
+    W2S = function(pos) return Core.Services.Camera:WorldToViewportPoint(pos) end,
+    getPos = function(inst) /* original getPos logic */ end,
+    getRoomNum = function(inst) /* original */ end,
+    isInESPRange = function(inst) /* original */ end,
+    isDoorLocked = function(room) /* original */ end,
+    makeHighlight = function(inst, color) /* original helper */ end
+}
+
+function Core.init()
+    -- Load RedzLib once
+    Core.RedzLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/rabarnazanm11/glowing-waffle/refs/heads/main/hh"))()
+end
+
+return Core
