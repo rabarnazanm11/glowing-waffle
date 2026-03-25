@@ -1,0 +1,88 @@
+-- YOUR doorsmud1.lua - Full Core with ALL 21 entities
+local Core = {}
+
+Core.Services = { /* your services */ }
+Core.Config = {
+    ENTITIES = {
+        {Name="RushMoving",Display="Rush",Color=Color3.fromRGB(255,80,0),notify=true,highlight=true,tracer=true},
+        {Name="Eyes",Display="Eyes",Color=Color3.fromRGB(255,30,30),notify=true,highlight=true,tracer=true,workspaceOnly=true},
+        {Name="AmbushMoving",Display="Ambush",Color=Color3.fromRGB(160,0,255),notify=true,highlight=true,tracer=true},
+        {Name="BackdoorRush",Display="Backdoor Rush",Color=Color3.fromRGB(255,120,0),notify=true,highlight=true,tracer=true},
+        {Name="Dread",Display="Dread",Color=Color3.fromRGB(180,0,0),notify=true,highlight=true,tracer=true},
+        {Name="GiggleCeiling",Display="Giggle",Color=Color3.fromRGB(255,150,200),notify=false,highlight=true,tracer=true},
+        {Name="SallyMoving",Display="Sally",Color=Color3.fromRGB(180,255,80),notify=true,highlight=true,tracer=true},
+        {Name="GloombatSwarm",Display="GloombatSwarm",Color=Color3.fromRGB(80,0,120),notify=false,highlight=false,tracer=false},
+        {Name="A60",Display="A-60",Color=Color3.fromRGB(50,100,255),notify=true,highlight=true,tracer=true},
+        {Name="A120",Display="A-120",Color=Color3.fromRGB(0,220,255),notify=true,highlight=true,tracer=true},
+        {Name="Screech",Display="Screech",Color=Color3.fromRGB(200,200,255),notify=true,highlight=true,tracer=true},
+        {Name="BackdoorLookman",Display="Lookman",Color=Color3.fromRGB(160,100,50),notify=true,highlight=true,tracer=true},
+        {Name="MonumentEntity",Display="Monument",Color=Color3.fromRGB(150,150,150),notify=true,highlight=true,tracer=true},
+        {Name="JeffTheKiller",Display="Jeff",Color=Color3.fromRGB(180,0,30),notify=true,highlight=true,tracer=true},
+        {Name="FigureRig",Display="Figure",Color=Color3.fromRGB(80,80,80),notify=true,highlight=true,tracer=true},
+        {Name="Snare",Display="Snare",Color=Color3.fromRGB(80,80,80),notify=false,highlight=true,tracer=false},
+        {Name="GloomPile",Display="GloomPile",Color=Color3.fromRGB(80,80,80),notify=false,highlight=true,tracer=false},
+        {Name="Gloombat",Display="Gloombat",Color=Color3.fromRGB(80,80,80),notify=false,highlight=true,tracer=false},
+        {Name="Grumbo",Display="Grumbo",Color=Color3.fromRGB(80,80,80),notify=false,highlight=true,tracer=true},
+        {Name="SeekHand",Display="SeekHand",Color=Color3.fromRGB(80,80,80),notify=false,highlight=true,tracer=true},
+        {Name="SeekSludge",Display="SeekSludge",Color=Color3.fromRGB(80,80,80),notify=false,highlight=true,tracer=true},
+        {Name="SeekWorm",Display="SeekWorm",Color=Color3.fromRGB(80,80,80),notify=false,highlight=true,tracer=true},
+    },
+    SEARCH_ITEMS = {"KeyObtain","Vitamins","GoldPile","Lockpick","Crucifix","Lighter","Battery","Flashlight","SkeletonKey","Candle","Smoothie","CrucifixOnTheWall","FuseObtain","LiveBreakerPolePickup","KeyIron","Donut","Compass","BandagePack","ElectricalKeyObtain"},
+    AUTOPROXI_BLACKLIST = {Wardrobe=true,WardrobeInner=true,Double_Bed=true,Painting_Big=true,Painting_VeryBig=true,Toolshed=true,Bed=true,Toilet=true,WallSink=true,Painting_Tall=true,Fireplace=true,Painting_Small=true,Typewriter=true,ReviveRift=true,Locker_Large=true,LadderModel=true,CircularVent=true,Dumpster=true,Ladder=true,FireBarrel=true},
+    LOOT_NAMES = {Drawer=true,DrawerLargeModel=true,Chest=true,ChestLock=true,LockedChest=true,ChestBox=true,ChestBoxLocked=true,GoldPile=true,RollTop=true,RolltopDesk=true,Cabinet=true,LiveHintBook=true},
+    LOOT_RANGE = 15,
+    CFG = {ItemColor=Color3.fromRGB(80,255,120),EntranceColor=Color3.fromRGB(187,187,14),LockedDoorColor=Color3.new(0,0,0),WardrobeColor=Color3.fromRGB(200,140,60),LeverColor=Color3.fromRGB(255,220,0),TracerThick=1,TracerAlpha=0.5,LabelSize=14}
+}
+
+-- Build maps
+Core.EntityMap = {}
+for _,e in ipairs(Core.Config.ENTITIES) do Core.EntityMap[e.Name] = e end
+Core.ItemSet = {}
+for _,name in ipairs(Core.Config.SEARCH_ITEMS) do Core.ItemSet[name] = true end
+
+Core.Utils = {
+    W2S = function(pos)
+        local v,onScreen = workspace.CurrentCamera:WorldToViewportPoint(pos)
+        return Vector2.new(v.X,v.Y), onScreen, v.Z
+    end,
+    getPos = function(inst)
+        if not inst then return end
+        if inst:IsA("BasePart") then return inst.Position end
+        if inst.PrimaryPart then return inst.PrimaryPart.Position end
+        local bp = inst:FindFirstChildWhichIsA("BasePart", true)
+        return bp and bp.Position
+    end,
+    getRoomNum = function(inst)
+        local p = inst
+        while p and p.Parent do
+            if p.Parent.Name == "CurrentRooms" then return tonumber(p.Name) end
+            p = p.Parent
+        end
+    end,
+    isInESPRange = function(inst)
+        local curRoom = game.Players.LocalPlayer:GetAttribute("CurrentRoom")
+        if not curRoom then return true end
+        local roomNum = Core.Utils.getRoomNum(inst)
+        return roomNum and math.abs(roomNum - curRoom) <= 1
+    end,
+    isDoorLocked = function(room)
+        local door = room:FindFirstChild("Door")
+        return door and door:FindFirstChild("Lock")
+    end,
+    makeHighlight = function(inst,color)
+        local h = Instance.new("Highlight")
+        h.FillColor = color; h.OutlineColor = color
+        h.FillTransparency = 0.4; h.OutlineTransparency = 0
+        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        h.Parent = inst
+        return h
+    end
+}
+
+function Core.init()
+    _G.DoorsHub = {} -- Global access
+    _G.DoorsHub.RedzLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/rabarnazanm11/glowing-waffle/refs/heads/main/hh"))()
+    _G.DoorsHub.Core = Core
+end
+
+return Core
