@@ -1,0 +1,369 @@
+-- Copy Position Utility v4.0
+
+local Players          = game:GetService("Players")
+local TweenService     = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui          = game:GetService("CoreGui")
+local LocalPlayer      = Players.LocalPlayer
+
+-- // Palette
+local C = {
+    BG      = Color3.fromRGB(13, 13, 20),
+    Surface = Color3.fromRGB(22, 22, 33),
+    Accent  = Color3.fromRGB(99, 102, 241),
+    Red     = Color3.fromRGB(239, 68, 90),
+    Green   = Color3.fromRGB(34, 197, 94),
+    Text    = Color3.fromRGB(245, 245, 255),
+    Muted   = Color3.fromRGB(115, 115, 145),
+    Border  = Color3.fromRGB(38, 38, 56),
+}
+
+local PANEL_W      = 192
+local PANEL_H      = 148
+local TWEEN_SHORT  = TweenInfo.new(0.12, Enum.EasingStyle.Quad)
+local TWEEN_MED    = TweenInfo.new(0.22, Enum.EasingStyle.Quad)
+
+-- // Helpers
+local function getHRP()
+    local c = LocalPlayer.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+-- FIX 1: copyText now returns bool so feedback only fires on success
+local function copyText(text)
+    if setclipboard then
+        local ok = pcall(setclipboard, text)
+        if ok then return true end
+    end
+    if Clipboard and Clipboard.set then
+        local ok = pcall(Clipboard.set, text)
+        if ok then return true end
+    end
+    return false
+end
+
+-- // Formatters
+local function fmtCFrame(cf)
+    return string.format(
+        "CFrame.new(%.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f)",
+        cf.X, cf.Y, cf.Z,
+        cf.XVector.X, cf.XVector.Y, cf.XVector.Z,
+        cf.YVector.X, cf.YVector.Y, cf.YVector.Z,
+        cf.ZVector.X, cf.ZVector.Y, cf.ZVector.Z
+    )
+end
+
+local function fmtPivot(cf)
+    return string.format(
+        "%.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f",
+        cf.X, cf.Y, cf.Z,
+        cf.XVector.X, cf.XVector.Y, cf.XVector.Z,
+        cf.YVector.X, cf.YVector.Y, cf.YVector.Z,
+        cf.ZVector.X, cf.ZVector.Y, cf.ZVector.Z
+    )
+end
+
+local function fmtVector(cf)
+    return string.format("Vector3.new(%.6f, %.6f, %.6f)", cf.X, cf.Y, cf.Z)
+end
+
+-- // Drag helper
+-- FIX 5: returns both the dist query fn AND a disconnect fn for cleanup
+local function MakeDraggable(handle, target)
+    local dragging  = false
+    local dragStart = nil
+    local startPos  = nil
+    local dragDist  = 0
+
+    local c1 = handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragDist  = 0
+            dragStart = input.Position
+            startPos  = target.Position
+        end
+    end)
+
+    local c2 = handle.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    local c3 = UserInputService.InputChanged:Connect(function(input)
+        if dragging and (
+            input.UserInputType == Enum.UserInputType.MouseMovement or
+            input.UserInputType == Enum.UserInputType.Touch
+        ) then
+            local delta = input.Position - dragStart
+            dragDist = delta.Magnitude
+            target.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    local function getDist()    return dragDist end
+    local function disconnect() c1:Disconnect() c2:Disconnect() c3:Disconnect() end
+
+    return getDist, disconnect
+end
+
+-- ============================================================
+-- // Main Panel GUI
+-- ============================================================
+local MainGui = Instance.new("ScreenGui")
+MainGui.Name = "CopyPosGui"
+MainGui.ResetOnSpawn = false
+MainGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+MainGui.Parent = CoreGui
+
+local Panel = Instance.new("Frame")
+Panel.Name = "Panel"
+Panel.Size = UDim2.new(0, PANEL_W, 0, PANEL_H)
+Panel.Position = UDim2.new(0.5, -PANEL_W / 2, 0, 58)
+Panel.BackgroundColor3 = C.BG
+Panel.BorderSizePixel = 0
+-- FIX 4: removed ClipsDescendants — it was clipping the UIStroke border
+Panel.Parent = MainGui
+
+Instance.new("UICorner", Panel).CornerRadius = UDim.new(0, 10)
+
+local PanelBorder = Instance.new("UIStroke")
+PanelBorder.Color = C.Border
+PanelBorder.Thickness = 1
+PanelBorder.Parent = Panel
+
+-- // Titlebar
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 30)
+TitleBar.BackgroundColor3 = C.Surface
+TitleBar.BorderSizePixel = 0
+TitleBar.ZIndex = 2
+TitleBar.Parent = Panel
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 10)
+TitleCorner.Parent = TitleBar
+
+-- Square off bottom half of TitleBar so it doesn't show rounded bottom corners
+local TitleFix = Instance.new("Frame")
+TitleFix.Size = UDim2.new(1, 0, 0.5, 0)
+TitleFix.Position = UDim2.new(0, 0, 0.5, 0)
+TitleFix.BackgroundColor3 = C.Surface
+TitleFix.BorderSizePixel = 0
+TitleFix.ZIndex = 2
+TitleFix.Parent = TitleBar
+
+-- Accent dot
+local Dot = Instance.new("Frame")
+Dot.Size = UDim2.new(0, 4, 0, 4)
+Dot.Position = UDim2.new(0, 10, 0.5, -2)
+Dot.BackgroundColor3 = C.Accent
+Dot.BorderSizePixel = 0
+Dot.ZIndex = 3
+Dot.Parent = TitleBar
+Instance.new("UICorner", Dot).CornerRadius = UDim.new(1, 0)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, -24, 1, 0)
+TitleLabel.Position = UDim2.new(0, 20, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "Copy Position"
+TitleLabel.TextColor3 = C.Text
+TitleLabel.TextSize = 12
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.ZIndex = 3
+TitleLabel.Parent = TitleBar
+
+-- Separator
+local Sep = Instance.new("Frame")
+Sep.Size = UDim2.new(1, 0, 0, 1)
+Sep.Position = UDim2.new(0, 0, 0, 30)
+Sep.BackgroundColor3 = C.Accent
+Sep.BackgroundTransparency = 0.55
+Sep.BorderSizePixel = 0
+Sep.Parent = Panel
+
+-- // Button container
+local BtnContainer = Instance.new("Frame")
+BtnContainer.Size = UDim2.new(1, -16, 0, 108)
+BtnContainer.Position = UDim2.new(0, 8, 0, 34)
+BtnContainer.BackgroundTransparency = 1
+BtnContainer.Parent = Panel
+
+local BtnLayout = Instance.new("UIListLayout")
+BtnLayout.SortOrder = Enum.SortOrder.LayoutOrder
+BtnLayout.Padding = UDim.new(0, 6)
+BtnLayout.Parent = BtnContainer
+
+-- // Button factory
+-- FIX 2: copying flag per button prevents hover/up events from overwriting green feedback
+local function NewButton(text, color, order)
+    local btn     = Instance.new("TextButton")
+    local copying = false  -- lock flag
+
+    btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.TextColor3 = C.Text
+    btn.TextSize = 11
+    btn.Font = Enum.Font.GothamBold
+    btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
+    btn.LayoutOrder = order
+    btn.Parent = BtnContainer
+
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = color:Lerp(Color3.new(1, 1, 1), 0.2)
+    stroke.Thickness = 1
+    stroke.Transparency = 0.6
+    stroke.Parent = btn
+
+    btn.MouseEnter:Connect(function()
+        if copying then return end
+        TweenService:Create(btn, TWEEN_SHORT, {BackgroundColor3 = color:Lerp(Color3.new(1,1,1), 0.18)}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        if copying then return end
+        TweenService:Create(btn, TWEEN_SHORT, {BackgroundColor3 = color}):Play()
+    end)
+    btn.MouseButton1Down:Connect(function()
+        if copying then return end
+        TweenService:Create(btn, TweenInfo.new(0.07), {BackgroundColor3 = color:Lerp(Color3.new(0,0,0), 0.18)}):Play()
+    end)
+    btn.MouseButton1Up:Connect(function()
+        if copying then return end
+        TweenService:Create(btn, TWEEN_SHORT, {BackgroundColor3 = color}):Play()
+    end)
+
+    -- expose lock so click handler can set it
+    local function setCopying(state) copying = state end
+
+    return btn, setCopying
+end
+
+-- FIX 3: all three buttons use palette colors — no inline Color3.fromRGB duplicates
+local CFrameBtn,  setCopyingCFrame  = NewButton("Copy CFrame",     C.Accent, 1)
+local PivotBtn,   setCopyingPivot   = NewButton("Copy WorldPivot", C.Red,    2)
+local VectorBtn,  setCopyingVector  = NewButton("Copy Vector3",    C.Green,  3)
+
+local BUTTONS = {
+    {btn = CFrameBtn,  setCopying = setCopyingCFrame,  color = C.Accent, label = "Copy CFrame",     fn = fmtCFrame},
+    {btn = PivotBtn,   setCopying = setCopyingPivot,   color = C.Red,    label = "Copy WorldPivot", fn = fmtPivot},
+    {btn = VectorBtn,  setCopying = setCopyingVector,  color = C.Green,  label = "Copy Vector3",    fn = fmtVector},
+}
+
+-- // Button wiring
+for _, d in ipairs(BUTTONS) do
+    d.btn.MouseButton1Click:Connect(function()
+        local part = getHRP()
+        if not part then return end
+
+        -- FIX 1: only show feedback if copy actually succeeded
+        local ok = copyText(d.fn(part.CFrame))
+        if not ok then return end
+
+        d.setCopying(true)
+        d.btn.Text = "Copied"
+        TweenService:Create(d.btn, TWEEN_SHORT, {BackgroundColor3 = C.Green}):Play()
+
+        task.delay(1.4, function()
+            if d.btn and d.btn.Parent then
+                d.btn.Text = d.label
+                TweenService:Create(d.btn, TWEEN_MED, {BackgroundColor3 = d.color}):Play()
+                d.setCopying(false)
+            end
+        end)
+    end)
+end
+
+-- Drag panel by titlebar only; store disconnect for cleanup
+local getDragDist, disconnectPanelDrag = MakeDraggable(TitleBar, Panel)
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        TweenService:Create(PanelBorder, TWEEN_MED, {Color = C.Accent}):Play()
+    end
+end)
+TitleBar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        TweenService:Create(PanelBorder, TWEEN_MED, {Color = C.Border}):Play()
+    end
+end)
+
+-- ============================================================
+-- // Floating Toggle Button
+-- ============================================================
+local ToggleGui = Instance.new("ScreenGui")
+ToggleGui.Name = "CopyPosToggle"
+ToggleGui.ResetOnSpawn = false
+ToggleGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ToggleGui.Parent = CoreGui
+
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0, 78, 0, 22)
+ToggleBtn.Position = UDim2.new(0.5, -39, 0, 30)
+ToggleBtn.BackgroundColor3 = C.Surface
+ToggleBtn.Text = "Hide"
+ToggleBtn.TextColor3 = C.Muted
+ToggleBtn.TextSize = 11
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.BorderSizePixel = 0
+ToggleBtn.AutoButtonColor = false
+ToggleBtn.Parent = ToggleGui
+
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0)
+
+local TStroke = Instance.new("UIStroke")
+TStroke.Color = C.Border
+TStroke.Thickness = 1
+TStroke.Parent = ToggleBtn
+
+ToggleBtn.MouseEnter:Connect(function()
+    TweenService:Create(TStroke,   TWEEN_SHORT, {Color = C.Accent}):Play()
+    TweenService:Create(ToggleBtn, TWEEN_SHORT, {TextColor3 = C.Text}):Play()
+end)
+ToggleBtn.MouseLeave:Connect(function()
+    TweenService:Create(TStroke,   TWEEN_SHORT, {Color = C.Border}):Play()
+    TweenService:Create(ToggleBtn, TWEEN_SHORT, {TextColor3 = C.Muted}):Play()
+end)
+
+local getToggleDragDist, disconnectToggleDrag = MakeDraggable(ToggleBtn, ToggleBtn)
+
+local panelVisible = true
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    if getToggleDragDist() > 6 then return end
+
+    panelVisible = not panelVisible
+
+    if panelVisible then
+        Panel.Visible = true
+        Panel.Size = UDim2.new(0, PANEL_W, 0, 0)
+        TweenService:Create(Panel, TWEEN_MED, {Size = UDim2.new(0, PANEL_W, 0, PANEL_H)}):Play()
+        ToggleBtn.Text = "Hide"
+    else
+        local t = TweenService:Create(Panel, TWEEN_MED, {Size = UDim2.new(0, PANEL_W, 0, 0)})
+        t.Completed:Connect(function()
+            Panel.Visible = false
+            Panel.Size = UDim2.new(0, PANEL_W, 0, PANEL_H) -- restore for next show
+        end)
+        t:Play()
+        ToggleBtn.Text = "Show"
+    end
+end)
+
+-- // Cleanup on GUI removal (prevents connection leaks on re-run)
+MainGui.Destroying:Connect(function()
+    disconnectPanelDrag()
+    disconnectToggleDrag()
+end)
+
+print("[CopyPosition v4] Loaded")
