@@ -206,8 +206,12 @@ end
 
 local autoHireEnabled = false
 local autoHireThread = nil
+
 local Trainers = TableKeys(TrainerTable)
-local Selected = Trainers[1] -- ← fixes nil on first use
+table.sort(Trainers) -- ← sort the array of keys alphabetically
+local Selected = Trainers[1]
+
+
 local zoneinput = ""
 local function startAutoHire()
     autoHireThread = task.spawn(function()
