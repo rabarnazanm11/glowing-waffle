@@ -149,13 +149,18 @@ local TrainerTable ={
   
   ["King Doge (Wolrd 18 - 24)"] = "King Doge",
   
+      ---------------------------------------------
+ --                 Wolrd 19                 --
+ -----------------------------------------------
+  
+  ["Overseer (Wolrd 19 - 24)"] = "Overseer",
   
   
   
 
   
   
-  ["Dont_Select (Wolrd Shhs - shshh)"] = "hshshjsjs",
+  
   --["Dont_Select (Wolrd Shhs - shshh)"] = "hshshjsjs",
 
   
